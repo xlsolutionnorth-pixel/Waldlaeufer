@@ -62,8 +62,9 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 .bar{display:flex;height:9px;border-radius:5px;overflow:hidden;margin:9px 0 6px;background:var(--line)}
 .legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;color:var(--muted)}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
-.actions{display:none;gap:8px;margin-top:10px}
+.actions{display:none;gap:8px;margin-top:10px;flex-wrap:wrap}
 .card.sel .actions{display:flex}
+.actions button.primary{flex-basis:100%}
 .actions button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:10px;padding:10px 6px;font-size:14px;cursor:pointer}
 .actions button.primary{background:var(--forest);color:#fff;border-color:var(--forest)}
 .modal{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
@@ -86,6 +87,23 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 .nav .nfoot button{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;padding:8px 12px;font-size:14px}
 .nav.off{background:#a3402f}
 body.navigating .topbar,body.navigating #suggest{display:none}
+.toolbar{display:flex;gap:8px;margin:0 0 12px;position:relative}
+.toolbar > button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:12px;padding:9px 4px;font-size:13.5px;font-weight:550;cursor:pointer;white-space:nowrap}
+.toolbar > button.on{background:color-mix(in srgb,var(--forest) 14%,transparent);border-color:var(--forest)}
+.dropdown{display:none;position:absolute;z-index:5;left:0;right:0;top:44px;background:var(--panel);border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 10px 28px rgba(0,0,0,.22);max-height:46vh;overflow-y:auto}
+.dropdown .item{display:flex;align-items:center;gap:10px;padding:11px 12px;border-bottom:1px solid var(--line);cursor:pointer}
+.dropdown .item:last-child{border-bottom:0}
+.dropdown .item .t{flex:1;min-width:0}
+.dropdown .item .t b{display:block;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dropdown .item .t small{color:var(--muted);font-size:12px}
+.dropdown .item .del{border:0;background:transparent;font-size:18px;padding:6px;color:var(--muted);cursor:pointer}
+.dropdown .empty{padding:16px;color:var(--muted);font-size:14px;text-align:center}
+.dropdown .head{padding:9px 12px 7px;font-size:12px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+.startinfo.locked{border-style:solid;background:color-mix(in srgb,var(--forest) 7%,transparent)}
+#toast{position:fixed;z-index:3000;left:50%;bottom:calc(var(--sheet-h,46vh) + 14px);transform:translateX(-50%);background:#1d2a22;color:#fff;
+  padding:10px 14px;border-radius:12px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:88vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
+#toast.show{opacity:1}
 .me-dot{width:16px;height:16px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 6px rgba(42,125,225,.25)}
 .start-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .leaflet-control-layers{border-radius:12px!important}
@@ -99,6 +117,7 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 </head>
 <body>
 <div id="map"></div>
+<div id="toast"></div>
 
 <div class="nav" id="nav">
   <div class="main">
@@ -126,6 +145,12 @@ body.navigating .topbar,body.navigating #suggest{display:none}
   <div class="sheet-body">
     <h1>Laufrunde finden</h1>
     <p class="sub">Rundkurse ab deinem Startpunkt – bevorzugt durch Wald und über Feldwege.</p>
+    <div class="toolbar">
+      <button id="newBtn">＋ Neue Suche</button>
+      <button id="histBtn">🕘 Letzte Suchen ▾</button>
+      <button id="savedBtn">★ Gespeichert ▾</button>
+      <div class="dropdown" id="dropdown"></div>
+    </div>
     <div class="startinfo" id="startinfo">⛳ <span>Tippe auf die Karte oder nutze 📍 für deinen Standort.</span></div>
     <div class="row">
       <div class="dist">
@@ -204,16 +229,41 @@ let routeLayers = [], results = [], selected = -1;
 const startIcon = L.divIcon({ className:"", html:'<div class="start-pin"></div>', iconSize:[26,26], iconAnchor:[13,26] });
 const meIcon = L.divIcon({ className:"", html:'<div class="me-dot"></div>', iconSize:[22,22], iconAnchor:[11,11] });
 
-function setStart(lat, lng, label){
-  start = { lat, lng };
+// Solange eine Suche läuft oder Ergebnisse angezeigt werden, ist der Startpunkt fixiert.
+// Erst „Neue Suche" gibt ihn wieder frei – so gehen Ergebnisse beim Anschauen der Karte nicht verloren.
+let locked = false, startLabel = "";
+function setStart(lat, lng, label, keepResults){
+  start = { lat, lng }; startLabel = label || "";
   if (!startMarker){
     startMarker = L.marker([lat, lng], { icon:startIcon, draggable:true }).addTo(map);
-    startMarker.on("dragend", () => { const p = startMarker.getLatLng(); setStart(p.lat, p.lng); });
+    startMarker.on("dragend", () => {
+      const p = startMarker.getLatLng();
+      if (locked){ startMarker.setLatLng([start.lat, start.lng]); lockedHint(); return; }
+      setStart(p.lat, p.lng);
+    });
   } else startMarker.setLatLng([lat, lng]);
-  $("startinfo").innerHTML = `⛳ <span><b>Start:</b> ${label ? escapeHtml(label) : lat.toFixed(5) + ", " + lng.toFixed(5)}</span>`;
-  clearRoutes();
+  updateStartInfo();
+  if (!keepResults) clearRoutes();
 }
-map.on("click", e => { if (!nav.active) setStart(e.latlng.lat, e.latlng.lng); });
+function startText(){ return startLabel ? escapeHtml(startLabel) : start.lat.toFixed(5) + ", " + start.lng.toFixed(5); }
+function updateStartInfo(){
+  const el = $("startinfo");
+  if (!start){ el.className = "startinfo"; el.innerHTML = "⛳ <span>Tippe auf die Karte oder nutze 📍 für deinen Standort.</span>"; return; }
+  el.className = "startinfo" + (locked ? " locked" : "");
+  el.innerHTML = locked ? `🔒 <span><b>Start:</b> ${startText()}<br><small style="color:var(--muted)">fixiert – für einen neuen Startpunkt „＋ Neue Suche"</small></span>`
+                        : `⛳ <span><b>Start:</b> ${startText()}</span>`;
+  try { startMarker && startMarker.dragging && (locked ? startMarker.dragging.disable() : startMarker.dragging.enable()); } catch(e){}
+}
+function setLocked(v){ locked = v; updateStartInfo(); }
+function lockedHint(){ toast("Startpunkt ist fixiert – tippe „＋ Neue Suche“, um ihn zu ändern."); }
+let toastTimer;
+function toast(t){ const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2600); }
+map.on("click", e => {
+  closeDropdown();
+  if (nav.active) return;
+  if (locked) return lockedHint();
+  setStart(e.latlng.lat, e.latlng.lng);
+});
 
 /* ---------- Bottom-Sheet ---------- */
 const sheetSizes = ["46vh", "78vh", "22vh"];
@@ -241,8 +291,9 @@ $("locBtn").onclick = async () => {
   try {
     const c = await getPosition();
     showMe(c.latitude, c.longitude);
-    setStart(c.latitude, c.longitude, "Mein Standort");
     map.setView([c.latitude, c.longitude], 15);
+    if (locked){ status(""); return lockedHint(); }
+    setStart(c.latitude, c.longitude, "Mein Standort");
     status("");
   } catch(e){
     status("Standort nicht verfügbar – bitte GPS & Berechtigung prüfen oder Startpunkt auf der Karte tippen.");
@@ -447,7 +498,7 @@ $("q").addEventListener("input", () => {
 $("q").addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
   const c = parseCoords($("q").value.trim());
-  if (c){ setStart(c[0], c[1]); map.setView(c, 15); $("q").blur(); $("suggest").style.display = "none"; }
+  if (c){ map.setView(c, 15); if (locked) lockedHint(); else setStart(c[0], c[1]); $("q").blur(); $("suggest").style.display = "none"; }
   else geocode($("q").value.trim());
 });
 
@@ -473,8 +524,8 @@ async function geocode(text){
       d.textContent = f.properties.label;
       d.onclick = () => {
         const [lng, lat] = f.geometry.coordinates;
-        setStart(lat, lng, f.properties.label);
         map.setView([lat, lng], 15);
+        if (locked) lockedHint(); else setStart(lat, lng, f.properties.label);
         box.style.display = "none"; $("q").value = f.properties.label; $("q").blur();
       };
       box.appendChild(d);
@@ -703,7 +754,7 @@ function analyse(feature){
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
     unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges, crossPts: cross, crossCount: cross.length, round, cum,
-    clean: cross.length === 0 && ov.share < 0.05,
+    clean: cross.length === 0 && ov.share < 0.05, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     ascent: Math.round(p.ascent || 0), coords, steps
   };
 }
@@ -730,8 +781,8 @@ async function search(){
   if (!start){ status("Bitte zuerst einen Startpunkt wählen (Karte antippen oder 📍)."); return; }
   if (!getKey()){ await askKey(); if (!getKey()) return; }
   const target = km();
-  searching = true; $("go").disabled = true;
-  clearRoutes(); results = [];
+  searching = true; $("go").disabled = true; closeDropdown();
+  clearRoutes(); results = []; setLocked(true);
   setProgress(0.02);
 
   const found = [], near = [];
@@ -794,9 +845,10 @@ async function search(){
       // Nichts im Toleranzbereich → die 3 nächstgelegenen trotzdem zeigen
       near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
       results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
+      addHistory(target);
       status(`Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
-    } else status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.`);
-  } finally { searching = false; $("go").disabled = false; setProgress(0); }
+    } else { addHistory(target); status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.`); }
+  } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
 }
 $("go").onclick = search;
 
@@ -843,11 +895,13 @@ function render(){
       <div class="actions">
         <button class="primary" data-a="run">▶ Navigation starten</button>
         <button data-a="gmaps">In Google Maps öffnen</button>
+        <button data-a="save">${isSaved(r) ? "★ Gespeichert" : "☆ Speichern"}</button>
       </div>`;
     c.onclick = (e) => {
       const a = e.target.closest("button") && e.target.closest("button").dataset.a;
       if (a === "run") return startNav(r);
       if (a === "gmaps") return openGoogle(r);
+      if (a === "save"){ toggleSave(r); e.target.textContent = isSaved(r) ? "★ Gespeichert" : "☆ Speichern"; return; }
       select(i);
     };
     box.appendChild(c);
@@ -923,6 +977,125 @@ function openGoogle(r){
   openExternal(url);
 }
 
+/* ---------- Speichern, Verlauf, Neue Suche ---------- */
+const MAX_SAVED = 10, MAX_HISTORY = 10;
+// Routen platzsparend ablegen (Koordinaten auf 5 Nachkommastellen ≈ 1 m)
+const r5 = v => Math.round(v * 1e5) / 1e5;
+// Koordinaten als ganzzahlige Differenzen speichern – ca. 4× kleiner als normale Zahlenpaare
+function encodeCoords(cs){
+  const out = []; let la = 0, lo = 0;
+  for (const c of cs){ const a = Math.round(c[0] * 1e5), b = Math.round(c[1] * 1e5); out.push(a - la, b - lo); la = a; lo = b; }
+  return out;
+}
+function decodeCoords(arr){
+  const out = []; let la = 0, lo = 0;
+  for (let i = 0; i < arr.length; i += 2){ la += arr[i]; lo += arr[i+1]; out.push([la / 1e5, lo / 1e5]); }
+  return out;
+}
+function unpackRoute(r){
+  const o = Object.assign({}, r);
+  if (o.c){ o.coords = decodeCoords(o.c); delete o.c; }
+  return o;
+}
+function packRoute(r){
+  const o = Object.assign({}, r);
+  delete o.cum; delete o.coords;
+  o.c = encodeCoords(r.coords);
+  o.doubled = (r.doubled || []).map(seg => seg.map(c => [r5(c[0]), r5(c[1])]));
+  return o;
+}
+function loadList(k){ try { return JSON.parse(store.get(k, "[]")) || []; } catch(e){ return []; } }
+function saveList(k, list){
+  // Wird der Speicher knapp, fallen die ältesten Einträge weg
+  for (let n = list.length; n >= 0; n--){
+    try { localStorage.setItem(k, JSON.stringify(list.slice(0, n))); return n; } catch(e){}
+  }
+  return 0;
+}
+
+function isSaved(r){ return loadList("saved").some(x => x.route.id === r.id); }
+function toggleSave(r){
+  let list = loadList("saved");
+  if (list.some(x => x.route.id === r.id)){ list = list.filter(x => x.route.id !== r.id); saveList("saved", list); toast("Route aus „Gespeichert“ entfernt."); return; }
+  if (list.length >= MAX_SAVED){ toast(`Maximal ${MAX_SAVED} Routen – lösche zuerst eine unter „★ Gespeichert“.`); return; }
+  list.unshift({ t: Date.now(), start: Object.assign({}, start), label: startLabel, route: packRoute(r) });
+  const n = saveList("saved", list);
+  toast(n === list.length ? `Gespeichert (${n}/${MAX_SAVED}).` : "Speicher voll – Route konnte nicht gespeichert werden.");
+}
+
+function addHistory(target){
+  if (!results.length) return;
+  const list = loadList("history").filter(h => !(Math.abs(h.start.lat - start.lat) < 1e-5 && Math.abs(h.start.lng - start.lng) < 1e-5 && h.km === target));
+  list.unshift({ t: Date.now(), start: Object.assign({}, start), label: startLabel, km: target, results: results.map(packRoute) });
+  saveList("history", list.slice(0, MAX_HISTORY));
+}
+
+function restore(startPt, label, kmVal, routes, statusText){
+  if (searching) return;
+  if (nav.active) stopNav(true);
+  closeDropdown();
+  setStart(startPt.lat, startPt.lng, label, true);
+  clearRoutes();
+  if (kmVal){ $("km").value = kmVal; }
+  results = routes.map(unpackRoute); selected = -1;
+  setLocked(true);
+  render();
+  if (results.length) select(0);
+  status(statusText);
+  setSheet(0);
+}
+
+function when(t){
+  const d = new Date(t), now = new Date(), hm = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5);
+  return days === 0 ? `heute ${hm}` : days === 1 ? `gestern ${hm}` : d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + hm;
+}
+const placeName = (label, st) => label ? escapeHtml(label) : `${st.lat.toFixed(4)}, ${st.lng.toFixed(4)}`;
+
+let ddMode = "";
+function closeDropdown(){ ddMode = ""; $("dropdown").style.display = "none"; $("histBtn").classList.remove("on"); $("savedBtn").classList.remove("on"); }
+function openDropdown(mode){
+  if (ddMode === mode) return closeDropdown();
+  ddMode = mode;
+  const dd = $("dropdown"), list = loadList(mode === "hist" ? "history" : "saved");
+  $("histBtn").classList.toggle("on", mode === "hist"); $("savedBtn").classList.toggle("on", mode === "saved");
+  if (mode === "hist"){
+    dd.innerHTML = `<div class="head">Letzte Suchen (${list.length}/${MAX_HISTORY})</div>` + (list.length ? list.map((h, i) => `
+      <div class="item" data-i="${i}"><div class="t"><b>${placeName(h.label, h.start)}</b>
+        <small>${fmt(h.km)} km gesucht · ${h.results.length} Runde${h.results.length === 1 ? "" : "n"} · ${when(h.t)}</small></div>
+        <button class="del" data-del="${i}" aria-label="löschen">🗑</button></div>`).join("") : '<div class="empty">Noch keine Suchen.</div>');
+  } else {
+    dd.innerHTML = `<div class="head">Gespeicherte Routen (${list.length}/${MAX_SAVED})</div>` + (list.length ? list.map((x, i) => `
+      <div class="item" data-i="${i}"><div class="t"><b>${fmt(x.route.distKm)} km · ${placeName(x.label, x.start)}</b>
+        <small>🌲 ${Math.round(x.route.nature * 100)} % Natur${x.route.clean ? " · ⭕ Rundkurs" : ""} · ${when(x.t)}</small></div>
+        <button class="del" data-del="${i}" aria-label="löschen">🗑</button></div>`).join("") : '<div class="empty">Noch keine Routen gespeichert.<br>Tippe bei einer Runde auf „☆ Speichern“.</div>');
+  }
+  dd.style.display = "block";
+  if (sheetIdx !== 1) setSheet(1);   // Feld hochklappen, damit die Liste Platz hat
+  dd.onclick = (e) => {
+    e.stopPropagation();
+    const del = e.target.closest("[data-del]");
+    const key = mode === "hist" ? "history" : "saved", cur = loadList(key);
+    if (del){ cur.splice(+del.dataset.del, 1); saveList(key, cur); ddMode = ""; openDropdown(mode); if (mode === "saved") render(); return; }
+    const it = e.target.closest(".item"); if (!it) return;
+    const x = cur[+it.dataset.i]; if (!x) return;
+    if (mode === "hist") restore(x.start, x.label, x.km, x.results, `Suche von ${when(x.t)} – ${x.results.length} Runde${x.results.length === 1 ? "" : "n"}.`);
+    else restore(x.start, x.label, null, [x.route], `Gespeicherte Route (${fmt(x.route.distKm)} km).`);
+  };
+}
+$("histBtn").onclick = (e) => { e.stopPropagation(); openDropdown("hist"); };
+$("savedBtn").onclick = (e) => { e.stopPropagation(); openDropdown("saved"); };
+document.addEventListener("click", e => { if (ddMode && !e.target.closest(".toolbar")) closeDropdown(); });
+
+$("newBtn").onclick = () => {
+  if (searching){ toast("Bitte warten, bis die laufende Suche fertig ist."); return; }
+  if (nav.active) stopNav(true);
+  closeDropdown();
+  clearRoutes();
+  setLocked(false);
+  status("Neuer Startpunkt: Karte antippen, 📍 nutzen oder oben einen Ort suchen. Den orangen Pin kannst du auch verschieben.");
+};
+
 /* ---------- Helfer ---------- */
 function openExternal(url){ if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) location.href = url; else window.open(url, "_blank", "noopener"); }
 document.querySelectorAll("a[target=_blank]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); openExternal(a.href); }));
@@ -933,7 +1106,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
