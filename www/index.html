@@ -202,7 +202,9 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 "use strict";
 
 /* ---------- Konstanten ---------- */
-const ORS = "https://api.openrouteservice.org";
+// Seit 2026 neue Adressen (api.openrouteservice.org ist abgekündigt, Kontingent dort auf 10 % gekürzt, Abschaltung Nov. 2026)
+const ORS = "https://api.heigit.org/openrouteservice";
+const GEOCODE = "https://api.heigit.org/pelias/v1";
 const TOL_KM = 2;              // erlaubte Abweichung (±2 km)
 const MAX_REQUESTS = 20;       // Obergrenze API-Aufrufe pro Suche (schont das Tageskontingent)
 const WANT_RESULTS = 6;
@@ -585,7 +587,7 @@ async function geocode(text){
   const key = getKey(); if (!key || !text) return;
   try {
     const c = map.getCenter();
-    const r = await fetch(`${ORS}/geocode/autocomplete?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=6&focus.point.lat=${c.lat}&focus.point.lon=${c.lng}`);
+    const r = await fetch(`${GEOCODE}/autocomplete?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=6&focus.point.lat=${c.lat}&focus.point.lon=${c.lng}`, { headers: { "Authorization": key } });
     if (!r.ok) return;
     const j = await r.json();
     const box = $("suggest");
