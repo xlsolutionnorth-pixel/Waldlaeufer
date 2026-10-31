@@ -1,13 +1,14 @@
 {
   "name": "waldlaeufer",
-  "version": "1.2.0",
+  "version": "1.6.0",
   "private": true,
   "description": "Jogging-Rundkurse bevorzugt durch Wald und über Feldwege",
   "dependencies": {
     "@capacitor/android": "^7.0.0",
     "@capacitor/core": "^7.0.0",
     "@capacitor/geolocation": "^7.0.0",
-    "@capacitor-community/text-to-speech": "^6.0.0"
+    "@capacitor-community/text-to-speech": "^6.0.0",
+    "@capacitor-community/background-geolocation": "1.2.25"
   },
   "devDependencies": {
     "@capacitor/cli": "^7.0.0"
