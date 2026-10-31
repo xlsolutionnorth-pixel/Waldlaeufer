@@ -165,7 +165,7 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 /* ---------- Konstanten ---------- */
 const ORS = "https://api.openrouteservice.org";
 const TOL_KM = 2;              // erlaubte Abweichung (±2 km)
-const MAX_REQUESTS = 24;       // Obergrenze API-Aufrufe pro Suche
+const MAX_REQUESTS = 30;       // Obergrenze API-Aufrufe pro Suche
 const WANT_RESULTS = 6;
 const REQ_GAP_MS = 1600;       // kostenloses Kontingent: 40 Anfragen/Minute
 
@@ -601,6 +601,83 @@ function overlap(coords){
   return { share: doubledPts / pts.length, segments, ranges };
 }
 
+// Selbstkreuzungen zählen. Die Route wird alle 5 m abgetastet; jede Stelle, an der sie sich selbst
+// wieder begegnet (auch über einen gemeinsamen Kreuzungspunkt oder ein gemeinsames Wegstück), wird
+// darauf geprüft, ob sie dort wirklich KREUZT: Kommt der zweite Durchgang von der einen Seite des
+// ersten und verlässt ihn zur anderen? Hin-und-zurück auf demselben Weg oder bloßes Berühren zählt nicht.
+function crossings(coords, cum){
+  const kx = Math.cos(coords[0][0] * Math.PI / 180) * 111320, ky = 110540;
+  const STEP = 5, NEAR = 6, GAP = 60, ARM = 30;
+  const pts = [];                                   // [x, y, dist] in Metern
+  let next = 0;
+  for (let i = 1; i < coords.length; i++){
+    const a = coords[i-1], b = coords[i], seg = cum[i] - cum[i-1];
+    while (seg > 0 && next <= cum[i]){
+      const t = (next - cum[i-1]) / seg;
+      pts.push([(a[1] + (b[1]-a[1])*t) * kx, (a[0] + (b[0]-a[0])*t) * ky, next]);
+      next += STEP;
+    }
+  }
+  const total = cum[cum.length - 1], n = pts.length;
+  if (n < 20) return [];
+  const cell = 10, grid = new Map(), key = (x, y) => Math.floor(x / cell) + ":" + Math.floor(y / cell);
+  pts.forEach((p, i) => { const k = key(p[0], p[1]); (grid.get(k) || grid.set(k, []).get(k)).push(i); });
+  // alle Begegnungs-Paare (i < j)
+  const pairs = [];
+  pts.forEach((p, i) => {
+    const cx = Math.floor(p[0] / cell), cy = Math.floor(p[1] / cell);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++){
+      const list = grid.get((cx+dx) + ":" + (cy+dy)); if (!list) continue;
+      for (const j of list){
+        if (j <= i) continue;
+        const along = pts[j][2] - p[2];
+        if (Math.min(along, total - along) <= GAP) continue;
+        if (Math.hypot(pts[j][0]-p[0], pts[j][1]-p[1]) < NEAR) pairs.push([i, j]);
+      }
+    }
+  });
+  // Paare zu zusammenhängenden Begegnungen gruppieren
+  const groups = [];
+  pairs.sort((u, v) => u[0] - v[0] || u[1] - v[1]);
+  for (const [i, j] of pairs){
+    const g = groups.find(g => i - g.i1 <= 3 && i >= g.i0 - 3 && j >= g.j0 - 4 && j <= g.j1 + 4);
+    if (g){ g.i0 = Math.min(g.i0, i); g.i1 = Math.max(g.i1, i); g.j0 = Math.min(g.j0, j); g.j1 = Math.max(g.j1, j); }
+    else groups.push({ i0: i, i1: i, j0: j, j1: j });
+  }
+  const idx = d => Math.max(0, Math.min(n - 1, Math.round(d / STEP)));
+  // Seite eines Punktes relativ zum ersten Durchgang: +1 links, −1 rechts, 0 = liegt auf dem Weg selbst
+  const side = (X, q0, q1) => {
+    let best = Infinity, sgn = 0;
+    for (let k = q0; k < q1; k++){
+      const A = pts[k], B = pts[k+1], dx = B[0]-A[0], dy = B[1]-A[1], L2 = dx*dx + dy*dy || 1;
+      const t = Math.max(0, Math.min(1, ((X[0]-A[0])*dx + (X[1]-A[1])*dy) / L2));
+      const d = Math.hypot(X[0] - (A[0] + t*dx), X[1] - (A[1] + t*dy));
+      if (d < best){ best = d; sgn = Math.sign(dx * (X[1]-A[1]) - dy * (X[0]-A[0])); }
+    }
+    return best < 12 ? 0 : sgn;
+  };
+  const hits = [];
+  for (const g of groups){
+    const d1a = pts[g.i0][2] - 2 * ARM, d1b = pts[g.i1][2] + 2 * ARM, d2a = pts[g.j0][2] - ARM, d2b = pts[g.j1][2] + ARM;
+    if (pts[g.i0][2] - ARM < 0 || d2b > total) continue;     // Start/Ziel ist kein Kreuzen
+    const q0 = idx(Math.max(0, d1a)), q1 = idx(d1b);
+    const sIn = side(pts[idx(d2a)], q0, q1), sOut = side(pts[idx(d2b)], q0, q1);
+    // Kreuzung nur, wenn der zweite Durchgang von einer Seite kommt und zur anderen Seite geht
+    if (sIn * sOut < 0){
+      const c = pts[Math.floor((g.i0 + g.i1) / 2)];
+      if (!hits.some(h => Math.hypot(h[0]-c[0], h[1]-c[1]) < 40)) hits.push([c[0], c[1]]);
+    }
+  }
+  return hits.map(h => [h[1] / ky, h[0] / kx]);
+}
+// Rundheit: 1 = Kreis, ~0,8 = Quadrat, nahe 0 = verknotet/Achterform/lang gezogen
+function roundness(coords, total){
+  const kx = Math.cos(coords[0][0] * Math.PI / 180) * 111320, ky = 110540;
+  let area = 0;
+  for (let i = 1; i < coords.length; i++) area += (coords[i-1][1] * kx) * (coords[i][0] * ky) - (coords[i][1] * kx) * (coords[i-1][0] * ky);
+  return Math.min(1, Math.abs(area / 2) * 4 * Math.PI / (total * total));
+}
+
 function analyse(feature){
   const p = feature.properties;
   const total = p.summary.distance;
@@ -615,13 +692,18 @@ function analyse(feature){
   (p.segments || []).forEach(seg => (seg.steps || []).forEach(st => steps.push({
     type: st.type, text: st.instruction || "", name: st.name && st.name !== "-" ? st.name : "", wp: st.way_points ? st.way_points[0] : 0 })));
   const ov = overlap(coords);
+  const cum = cumulative(coords);
+  const cross = crossings(coords, cum);
+  const round = roundness(coords, cum[cum.length - 1] || 1);
   // Punkte: Wald-/Feldwege hoch, Hauptstraßen und Radwege abwerten, doppelt gelaufene Strecke stark abwerten
   const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 20
-              - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15 - ov.share * 90;
+              - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15 - ov.share * 90
+              - cross.length * 14 + round * 30;
   return {
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
-    unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges,
+    unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges, crossPts: cross, crossCount: cross.length, round, cum,
+    clean: cross.length === 0 && ov.share < 0.05,
     ascent: Math.round(p.ascent || 0), coords, steps
   };
 }
@@ -644,6 +726,7 @@ function isDuplicate(a, b){
 let searching = false;
 async function search(){
   if (searching) return;
+  if (nav.active) stopNav(true);   // laufende Navigation gehört zur alten Route
   if (!start){ status("Bitte zuerst einen Startpunkt wählen (Karte antippen oder 📍)."); return; }
   if (!getKey()){ await askKey(); if (!getKey()) return; }
   const target = km();
@@ -655,17 +738,19 @@ async function search(){
   let requests = 0, okCount = 0, errCount = 0, lastErr = "";
   // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
   const phases = [
-    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 16 },
+    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 22 },
     { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege", budget: 99 }
   ];
   try {
     for (const ph of phases){
-      if (!ph.nature && found.length >= 3) break;
+      const cleanN = () => found.filter(r => r.clean).length;
+      if (!ph.nature && found.length >= 3 && cleanN() >= 1) break;
       // Längenfaktor je Profil: openrouteservice liefert oft deutlich längere/kürzere Runden als angefragt
       const fKey = "lenFactor_" + ph.profile;
       let factor = Number(store.get(fKey, "0.75")) || 0.75;
       let tries = 0;
-      while (tries < ph.budget && found.length < WANT_RESULTS && requests < MAX_REQUESTS){
+      // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
+      while (tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
         tries++; requests++;
         status(`${ph.label} … ${found.length} passende Runde${found.length === 1 ? "" : "n"} (Versuch ${requests}/${MAX_REQUESTS})`);
         setProgress(requests / MAX_REQUESTS);
@@ -696,7 +781,7 @@ async function search(){
               found.push(r);
               // Sortierung: Natur-Anteil zählt am meisten, nähere Distanz leicht bevorzugt
               found.sort((a, b) => (b.score - Math.abs(b.dev) * 6) - (a.score - Math.abs(a.dev) * 6));
-              results = found.slice(); render();
+              results = found.slice(0, WANT_RESULTS); render();
             }
           } else if (!near.some(o => isDuplicate(o, r))) near.push(r);
         }
@@ -735,6 +820,7 @@ function render(){
         <span style="width:12px;height:12px;border-radius:3px;background:${color};display:inline-block"></span>
         <span class="km">${fmt(r.distKm)} km</span>
         <span class="badge">🌲 ${pc(r.nature)} % Natur</span>
+        ${r.clean ? '<span class="badge" style="background:color-mix(in srgb,#2a7de1 16%,transparent);color:#2a7de1">⭕ Rundkurs</span>' : ""}
         <span class="meta">↗ ${r.ascent} hm</span>
       </div>
       <div class="bar">
@@ -750,6 +836,7 @@ function render(){
         <span><i style="background:var(--c-main)"></i>Hauptstraße ${pc(r.main)} %</span>
         <span>unbefestigt ${pc(r.unpaved)} %</span>
         <span>↔ ${pc(r.overlap)} % doppelt</span>
+        <span>✕ ${r.crossCount} Kreuzung${r.crossCount === 1 ? "" : "en"}</span>
       </div>
       ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
       ${r.relaxed && !r.outside ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
@@ -809,6 +896,8 @@ function drawDecor(r, color){
     L.marker(p.ll, { icon: L.divIcon({ className: "", html: `<div class="dir-arrow">${arrowSvg(p.angle, isDoubled(dist))}</div>`, iconSize: [16,16], iconAnchor: [8,8] }),
       interactive: false, keyboard: false }).addTo(decor);
   }
+  // Kreuzungspunkte als kleine Kreise
+  (r.crossPts || []).forEach(ll => L.marker(ll, { icon: L.divIcon({ className: "", html: '<div style="width:12px;height:12px;border-radius:50%;border:2.5px solid #fff;background:#d1453b;box-shadow:0 0 2px rgba(0,0,0,.6)"></div>', iconSize: [12,12], iconAnchor: [6,6] }), interactive: false }).addTo(decor));
   // Kilometer-Nummern + Startmarke
   const kmIcon = (txt, off) => L.divIcon({ className: "", html: `<div class="km-mark" style="--rc:${color};${off ? `transform:translate(${off[0]}px,${off[1]}px)` : ""}">${txt}</div>`, iconSize: [22,22], iconAnchor: [11,11] });
   for (let k = 1; k * 1000 < total - 150; k++){
@@ -819,6 +908,7 @@ function drawDecor(r, color){
 }
 
 function clearRoutes(){
+  if (typeof nav !== "undefined" && nav.active) stopNav(true);
   routeLayers.forEach(l => map.removeLayer(l)); routeLayers = []; results = []; selected = -1;
   if (decor){ map.removeLayer(decor); decor = null; }
   $("results").innerHTML = "";
@@ -843,7 +933,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { setStart, analyse, overlap, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
