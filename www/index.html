@@ -87,6 +87,10 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 .nav .nfoot button{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;padding:8px 12px;font-size:14px}
 .nav.off{background:#a3402f}
 body.navigating .topbar,body.navigating #suggest{display:none}
+.sortbar{display:none;align-items:center;gap:6px;margin:6px 0 2px;font-size:13px;color:var(--muted);flex-wrap:wrap}
+.sortbar.show{display:flex}
+.sortbar button{border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:20px;padding:6px 11px;font-size:13px;cursor:pointer}
+.sortbar button.on{background:var(--forest);border-color:var(--forest);color:#fff}
 .toolbar{display:flex;gap:8px;margin:0 0 12px;position:relative}
 .toolbar > button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:12px;padding:9px 4px;font-size:13.5px;font-weight:550;cursor:pointer;white-space:nowrap}
 .toolbar > button.on{background:color-mix(in srgb,var(--forest) 14%,transparent);border-color:var(--forest)}
@@ -164,6 +168,12 @@ body.navigating .topbar,body.navigating #suggest{display:none}
     <p class="hint">Es werden Runden mit ±2 km Abweichung angezeigt.</p>
     <div class="progress" id="prog"><i></i></div>
     <div id="status"></div>
+    <div class="sortbar" id="sortbar">
+      <span>Sortieren:</span>
+      <button data-s="best">Empfehlung</button>
+      <button data-s="up">Wenig Höhenmeter</button>
+      <button data-s="down">Viele Höhenmeter</button>
+    </div>
     <div id="results"></div>
   </div>
 </div>
@@ -715,8 +725,12 @@ $("keyTest").onclick = async () => {
 /* ---------- Routing ---------- */
 // Gewichtung "grün/ruhig": Werte 0…1 (v2-Format). Falls der Server eine Variante ablehnt,
 // wird automatisch die nächst einfachere probiert: beide → nur ruhig → ohne.
-const WEIGHT_MODES = [{ green: 1, quiet: 1 }, { quiet: 1 }, null];
-let weightMode = Math.min(2, Number(store.get("weightMode", "0")) || 0);   // gemerkt, damit keine Anfragen für abgelehnte Varianten verschwendet werden
+// "ruhig" stark gewichtet zieht Routen in Wohnstraßen (die sind ruhig) – deshalb nur noch schwach,
+// "grün" (Wald, Wiesen, Parks) dafür voll.
+const WEIGHT_MODES = [{ green: 1, quiet: 0.3 }, { green: 1 }, { quiet: 0.3 }, null];
+let weightMode = Math.min(WEIGHT_MODES.length - 1, Number(store.get("weightMode2", "0")) || 0);
+// Grün-Index (0–10) je Wegstück als Zusatzinfo – erkennt bebaute Gebiete. Falls der Server ihn nicht kennt: weglassen.
+let useGreenExtra = store.get("noGreenExtra", "0") !== "1";   // gemerkt, damit keine Anfragen für abgelehnte Varianten verschwendet werden
 
 // Verbrauch mitzählen (Tageskontingent kostenlos: 2000 Routen/Tag)
 function usage(){ const today = new Date().toDateString(); let u; try { u = JSON.parse(store.get("usage", "{}")); } catch(e){ u = {}; } return u.day === today ? u : { day: today, n: 0 }; }
@@ -755,7 +769,7 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
   const w = nature ? WEIGHT_MODES[weightMode] : null;
   if (w) options.profile_params = { weightings: Object.assign({}, w) };
   const body = { coordinates: [[(opts.lng ?? start.lng), (opts.lat ?? start.lat)]], options, elevation: true,
-                 extra_info: ["waytype", "surface"], instructions: true, language: "de", units: "m" };
+                 extra_info: useGreenExtra ? ["waytype", "surface", "green"] : ["waytype", "surface"], instructions: true, language: "de", units: "m" };
   let r;
   try {
     r = await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
@@ -773,9 +787,16 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
     else if (j && j.message && !r.ok) msg = j.message;
   } catch(e){}
   if (!r.ok){
-    if (r.status === 400 && w && weightMode < WEIGHT_MODES.length - 1){
-      weightMode++; store.set("weightMode", String(weightMode));   // einfachere Gewichtung versuchen
-      return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
+    if (r.status === 400){
+      const extraProblem = /extra/i.test(msg) && useGreenExtra;
+      if (extraProblem || (!(w && weightMode < WEIGHT_MODES.length - 1) && useGreenExtra)){
+        useGreenExtra = false; store.set("noGreenExtra", "1");     // ohne Grün-Index erneut
+        return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
+      }
+      if (w && weightMode < WEIGHT_MODES.length - 1){
+        weightMode++; store.set("weightMode2", String(weightMode));   // einfachere Gewichtung versuchen
+        return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
+      }
     }
     throw orsError(r.status, msg);
   }
@@ -991,6 +1012,7 @@ function pruneSpurs(feature){
   const props = Object.assign({}, P, {
     summary: Object.assign({}, P.summary, { distance: len }),
     ascent: Math.round((P.ascent || 0) * (origLen ? len / origLen : 1)),
+    descent: Math.round((P.descent || 0) * (origLen ? len / origLen : 1)),
     segments: [{ steps }], extras: newExtras
   });
   return { feature: { type: "Feature", geometry: { type: "LineString", coordinates: C }, properties: props }, removed, removedM };
@@ -1015,17 +1037,63 @@ function analyse(feature){
   const cum = cumulative(coords);
   const cross = crossings(coords, cum);
   const round = roundness(coords, cum[cum.length - 1] || 1);
-  // Punkte: Wald-/Feldwege hoch, Hauptstraßen und Radwege abwerten, doppelt gelaufene Strecke stark abwerten
-  const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 20
-              - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15 - ov.share * 90
-              - cross.length * 14 + round * 30;
+  // Grün-Index: Durchschnitt 0–10 (niedrig = bebaut/Wohngebiet)
+  let green = null;
+  if (ex.green && ex.green.summary && ex.green.summary.length){
+    let gs = 0, gd = 0; ex.green.summary.forEach(x => { gs += x.value * x.distance; gd += x.distance; });
+    if (gd > 0) green = gs / gd;
+  }
+  // Punkte: Wald-/Feldwege hoch. Nebenstraßen (meist Wohngebiet) deutlich abwerten, Radwege nur leicht –
+  // lieber ein Radweg am Feld als quer durch die Siedlung. Hauptstraßen stark abwerten.
+  // Dazu: doppelte Strecke, Kreuzungen, Rundheit und – falls vorhanden – der Grün-Index.
+  const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 10
+              - pct("main") * 120 - pct("street") * 45 - pct("cycle") * 8 - ov.share * 90
+              - cross.length * 14 + round * 30 + (green !== null ? (green - 5) * 5 : 0);
+  // Laufrichtung: Vorzeichen der umschlossenen Fläche (positiv = gegen den Uhrzeigersinn)
+  let area2 = 0;
+  for (let k = 1; k < coords.length; k++) area2 += coords[k-1][1] * coords[k][0] - coords[k][1] * coords[k-1][0];
   return {
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
     unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges, crossPts: cross, crossCount: cross.length, round, cum,
     clean: cross.length === 0 && ov.share < 0.05, spursRemoved: pruned.removed, spurM: pruned.removedM, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    ascent: Math.round(p.ascent || 0), coords, steps
+    ascent: Math.round(p.ascent || 0), descent: Math.round(p.descent || 0), green, clockwise: area2 < 0, reversed: false, coords, steps
   };
+}
+
+// Route in Gegenrichtung: Geometrie umdrehen, Abbiegehinweise aus der Geometrie neu berechnen
+// (aus "links" wird nicht einfach "rechts" – die Winkel werden für die neue Laufrichtung ermittelt).
+function reverseRoute(r){
+  const n = r.coords.length, C = r.coords.slice().reverse();
+  const cum = cumulative(C), total = cum[n - 1];
+  const bAt = (idx, dir) => {
+    let k = idx, d = 0;
+    while (k + dir >= 0 && k + dir < n && d < 20){ d += haversine(C[k], C[k + dir]); k += dir; }
+    if (k === idx) return null;
+    return dir < 0 ? bearing(C[k], C[idx]) : bearing(C[idx], C[k]);
+  };
+  // Manöverpunkte der Original-Route (ohne Start/Ziel), mit dem Namen des Weges, der VOR dem Punkt lag
+  const orig = (r.steps || []).filter(st => st.type !== 10);
+  const steps = [{ type: 11, text: "", name: orig.length ? (orig[orig.length - 1].name || "") : "", wp: 0 }];
+  for (let k = orig.length - 1; k >= 1; k--){
+    const st = orig[k];
+    if (st.type === 11) continue;
+    const idx = n - 1 - st.wp;
+    if (idx <= 0 || idx >= n - 1) continue;
+    const inB = bAt(idx, -1), outB = bAt(idx, +1);
+    let type = inB !== null && outB !== null ? turnType(inB, outB) : null;
+    if (type === null) type = 6;                       // geradeaus (wird nicht angesagt)
+    steps.push({ type, text: "", name: orig[k - 1].name || "", wp: idx });
+  }
+  steps.push({ type: 10, text: "", name: "", wp: n - 1 });
+  return Object.assign({}, r, {
+    coords: C, cum, steps,
+    ascent: r.descent || r.ascent, descent: r.ascent,
+    doubled: (r.doubled || []).map(seg => seg.slice().reverse()),
+    doubledRanges: (r.doubledRanges || []).map(x => [total - x[1], total - x[0]]),
+    clockwise: !r.clockwise, reversed: !r.reversed,
+    id: r.id.endsWith("-r") ? r.id.slice(0, -2) : r.id + "-r"
+  });
 }
 
 function haversine(a, b){
@@ -1136,7 +1204,25 @@ $("go").onclick = search;
 /* ---------- Darstellung ---------- */
 const PALETTE = ["#2f8a4a", "#d9832b", "#7a4fc4", "#c43b6e", "#1f8fa3", "#8a6d1f"];
 
+let sortMode = store.get("sort", "best");
+function sortResults(){
+  const selId = results[selected] && results[selected].id;
+  const rec = r => r.score - Math.abs(r.dev || 0) * 6;
+  if (sortMode === "up") results.sort((a, b) => (a.ascent - b.ascent) || (rec(b) - rec(a)));
+  else if (sortMode === "down") results.sort((a, b) => (b.ascent - a.ascent) || (rec(b) - rec(a)));
+  else results.sort((a, b) => rec(b) - rec(a));
+  if (selId) selected = results.findIndex(r => r.id === selId);
+  document.querySelectorAll("#sortbar button").forEach(b => b.classList.toggle("on", b.dataset.s === sortMode));
+  $("sortbar").classList.toggle("show", results.length > 1);
+}
+$("sortbar").onclick = (e) => {
+  const b = e.target.closest("button[data-s]"); if (!b) return;
+  sortMode = b.dataset.s; store.set("sort", sortMode); render();
+  if (selected >= 0) select(selected);
+};
+
 function render(){
+  sortResults();
   routeLayers.forEach(l => map.removeLayer(l)); routeLayers = [];
   const box = $("results"); box.innerHTML = "";
   results.forEach((r, i) => {
@@ -1170,20 +1256,29 @@ function render(){
         <span>unbefestigt ${pc(r.unpaved)} %</span>
         <span>↔ ${pc(r.overlap)} % doppelt</span>
         <span>✕ ${r.crossCount} Kreuzung${r.crossCount === 1 ? "" : "en"}</span>
+        ${typeof r.green === "number" ? `<span>🌳 Grün ${fmt(r.green)}/10</span>` : ""}
+        <span>${r.clockwise ? "↻ im Uhrzeigersinn" : "↺ gegen den Uhrzeigersinn"}</span>
       </div>
       ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
       ${r.spursRemoved ? `<div class="hint">✂ ${r.spursRemoved === 1 ? "Ein Stichweg" : r.spursRemoved + " Stichwege"} (hin und gleich zurück) automatisch entfernt.</div>` : ""}
       ${r.relaxed && !r.outside ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
       <div class="actions">
         <button class="primary" data-a="run">▶ Navigation starten</button>
-        <button data-a="gmaps">In Google Maps öffnen</button>
+        <button data-a="gmaps">🗺 Google Maps</button>
         <button data-a="save">${isSaved(r) ? "★ Gespeichert" : "☆ Speichern"}</button>
+        <button data-a="rev">⇄ Richtung umkehren</button>
       </div>`;
     c.onclick = (e) => {
       const a = e.target.closest("button") && e.target.closest("button").dataset.a;
       if (a === "run") return startNav(r);
       if (a === "gmaps") return openGoogle(r);
       if (a === "save"){ toggleSave(r); e.target.textContent = isSaved(r) ? "★ Gespeichert" : "☆ Speichern"; return; }
+      if (a === "rev"){
+        if (nav.active){ toast("Erst die Navigation beenden, dann die Richtung umkehren."); return; }
+        results[i] = reverseRoute(r); selected = i; render();
+        toast(results[i].clockwise ? "Jetzt im Uhrzeigersinn ↻" : "Jetzt gegen den Uhrzeigersinn ↺");
+        return;
+      }
       select(i);
     };
     box.appendChild(c);
@@ -1245,6 +1340,7 @@ function drawDecor(r, color){
 
 function clearRoutes(){
   if (typeof nav !== "undefined" && nav.active) stopNav(true);
+  try { $("sortbar").classList.remove("show"); } catch(e){}
   routeLayers.forEach(l => map.removeLayer(l)); routeLayers = []; results = []; selected = -1;
   if (decor){ map.removeLayer(decor); decor = null; }
   $("results").innerHTML = "";
@@ -1388,7 +1484,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
