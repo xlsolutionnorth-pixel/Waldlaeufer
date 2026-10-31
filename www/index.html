@@ -545,7 +545,7 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
       headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
       body: JSON.stringify(body)
     });
-  } catch(e){ throw Object.assign(new Error("Keine Internetverbindung zum Routendienst"), { code: "net" }); }
+  } catch(e){ throw Object.assign(new Error("Keine Verbindung zum Routendienst (" + (e && e.message || e) + ")"), { code: "net" }); }
   let j = null, msg = "";
   try { j = await r.json(); msg = j && j.error ? (j.error.message || JSON.stringify(j.error)) : ""; } catch(e){}
   if (!r.ok){
@@ -634,7 +634,7 @@ async function search(){
           errCount++; lastErr = e.message;
           if (e.code === "key"){ status("Der API-Schlüssel wurde abgelehnt. Bitte unter ⚙️ prüfen."); return; }
           if (e.code === "rate"){ status("Tageslimit oder Minutenlimit erreicht – kurz warten …"); await sleep(10000); continue; }
-          if (e.code === "net"){ status("Keine Verbindung zum Routendienst – Internet prüfen."); return; }
+          if (e.code === "net"){ status(e.message + " – Internet prüfen."); return; }
           // Bei 4 Fehlern ohne einen einzigen Erfolg abbrechen und den Grund zeigen
           if (okCount === 0 && errCount >= 4){ status("Der Routendienst meldet einen Fehler: " + lastErr); return; }
           await sleep(REQ_GAP_MS); continue;
