@@ -410,11 +410,12 @@ function stepPhrase(st){
 async function startNav(r){
   if (nav.active) stopNav(true);
   if (!r.steps || !r.steps.length){ status("Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen."); return; }
-  Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0 });
+  Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0,
+    ran:0, anchor:null, hAnchor:null, heading:null, leavePos:null, leaveRan:0, saved:0, offGuide:0 });
   document.body.classList.add("navigating");
   $("nav").style.display = "block"; $("nav").classList.remove("off");
   $("navMute").textContent = nav.muted ? "🔇" : "🔊";
-  $("navArrow").textContent = "⬆"; $("navDist").textContent = fmtDist(nav.cum[nav.cum.length - 1]);
+  setArrow("⬆"); $("navDist").textContent = fmtDist(nav.cum[nav.cum.length - 1]);
   $("navText").textContent = "GPS wird gesucht …"; $("navInfo").textContent = "";
   setSheet(2);
   map.setView(r.coords[0], 17);
@@ -458,27 +459,76 @@ async function startNav(r){
   } catch(e){ $("navText").textContent = "Kein GPS – bitte Standort-Berechtigung prüfen."; }
 }
 
+// Himmelsrichtung von a nach b in Grad (0 = Norden, im Uhrzeigersinn)
+function bearing(a, b){
+  const t = Math.PI / 180, y = Math.sin((b[1]-a[1])*t) * Math.cos(b[0]*t);
+  const x = Math.cos(a[0]*t) * Math.sin(b[0]*t) - Math.sin(a[0]*t) * Math.cos(b[0]*t) * Math.cos((b[1]-a[1])*t);
+  return (Math.atan2(y, x) / t + 360) % 360;
+}
+const COMPASS = ["Norden", "Nordosten", "Osten", "Südosten", "Süden", "Südwesten", "Westen", "Nordwesten"];
+function directionWord(brg){
+  if (nav.heading === null) return "Richtung " + COMPASS[Math.round(brg / 45) % 8];
+  const d = ((brg - nav.heading + 540) % 360) - 180;
+  return Math.abs(d) < 30 ? "geradeaus" : Math.abs(d) > 150 ? "hinter dir" : d > 0 ? "rechts" : "links";
+}
+function setArrow(glyph, rot){
+  $("navArrow").innerHTML = `<span style="display:inline-block;transform:rotate(${Math.round(rot || 0)}deg)">${glyph}</span>`;
+}
+
 function updateNav(p){
   showMe(p[0], p[1]);
   map.panTo(p, { animate:true });
   const r = nav.route, cum = nav.cum, total = cum[cum.length - 1];
+
+  // Tatsächlich gelaufene Strecke aus der GPS-Spur (kleines Zittern im Stand wird ignoriert)
+  if (!nav.anchor) nav.anchor = p;
+  const step = haversine(nav.anchor, p);
+  if (step >= 8 && step < 300){ nav.ran += step; nav.anchor = p; }
+  else if (step >= 300) nav.anchor = p;                    // GPS-Sprung: nicht mitzählen
+  // Laufrichtung (aus den letzten ~20 m)
+  if (!nav.hAnchor) nav.hAnchor = p;
+  if (haversine(nav.hAnchor, p) >= 20){ nav.heading = bearing(nav.hAnchor, p); nav.hAnchor = p; }
+  const kmDone = Math.floor(nav.ran / 1000);
+  if (kmDone > nav.km){ nav.km = kmDone; nav.kmPending = true; }
+
   const loc = locate(p);
+  const box = $("nav");
+  const ranKm = fmt(nav.ran / 1000);
 
   // Abseits der Route?
-  const box = $("nav");
   if (loc.d > OFF_ROUTE_M){
-    if (!nav.offSince) nav.offSince = Date.now();
+    if (!nav.offSince){ nav.offSince = Date.now(); nav.leavePos = cum[nav.idx]; nav.leaveRan = nav.ran; }
     if (Date.now() - nav.offSince > 8000){
+      // Richtung zum nächstgelegenen Punkt der restlichen Route
+      const target = pointAt(r.coords, cum, loc.pos).ll;
+      const brg = bearing(p, target), word = directionWord(brg);
       box.classList.add("off");
-      $("navArrow").textContent = "⚠";
+      setArrow("⬆", brg);
       $("navDist").textContent = fmtDist(loc.d);
-      $("navText").textContent = "Abseits der Route – zurück zur markierten Linie";
-      if (!nav.offSaid){ speak("Du hast die Route verlassen."); vibrate([300, 150, 300]); nav.offSaid = true; }
+      $("navText").textContent = `Abseits der Route – nächster Routenpunkt ${word}`;
+      $("navInfo").textContent = `${ranKm} km gelaufen`;
+      if (!nav.offSaid){
+        speak(`Abseits der Route. Die Strecke geht ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word} weiter.`);
+        vibrate([300, 150, 300]); nav.offSaid = true; nav.offGuide = Date.now();
+      } else if (Date.now() - nav.offGuide > 90000){
+        // alle 1,5 Minuten kurz erinnern, wohin es geht
+        nav.offGuide = Date.now();
+        speak(`Nächster Routenpunkt ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word}.`);
+      }
+      if (nav.kmPending){ nav.kmPending = false; speak(`${nav.km} Kilometer gelaufen.`); }
       return;
     }
   } else {
-    if (nav.offSaid) speak("Wieder auf der Route.");
-    nav.offSince = 0; nav.offSaid = false; box.classList.remove("off");
+    if (nav.leavePos !== null){
+      // Zurück auf der Route: war das eine Abkürzung?
+      const jump = loc.pos - nav.leavePos, detour = nav.ran - nav.leaveRan, saved = jump - detour;
+      if (jump > 300 && saved > 200){
+        nav.saved += saved;
+        speak(`Abkürzung erkannt – du sparst ${spokenDist(saved).replace("Metern", "Meter").replace("Kilometern", "Kilometer")}. Weiter geht's.`);
+        toast(`Abkürzung erkannt: −${fmtDist(saved)}`);
+      } else if (nav.offSaid) speak("Wieder auf der Route.");
+    }
+    nav.offSince = 0; nav.offSaid = false; nav.leavePos = null; box.classList.remove("off");
     if (loc.pos >= cum[nav.idx] - 30) nav.idx = loc.idx;   // nur vorwärts übernehmen
   }
   const pos = Math.max(loc.pos, cum[nav.idx]);
@@ -493,16 +543,23 @@ function updateNav(p){
   const remaining = Math.max(0, total - pos);
 
   if (!next || remaining < 25){
-    $("navArrow").textContent = "🏁"; $("navDist").textContent = "Ziel"; $("navText").textContent = "Runde geschafft!";
-    $("navInfo").textContent = `${fmt(total / 1000)} km gelaufen`;
-    if (!nav.spoken.goal && remaining < 40){ nav.spoken.goal = true; speak(`Ziel erreicht. Du bist ${fmt(total / 1000)} Kilometer gelaufen. Stark!`); vibrate([200, 100, 200, 100, 400]); }
+    setArrow("🏁"); $("navDist").textContent = "Ziel"; $("navText").textContent = "Runde geschafft!";
+    const diff = total - nav.ran;
+    const extra = diff > 300 ? ` · ${fmt(diff / 1000)} km abgekürzt` : diff < -300 ? ` · ${fmt(-diff / 1000)} km Umweg` : "";
+    $("navInfo").textContent = `${ranKm} km gelaufen${extra}`;
+    if (!nav.spoken.goal && remaining < 40){
+      nav.spoken.goal = true;
+      const extraSpoken = diff > 300 ? `, ${fmt(diff / 1000)} Kilometer abgekürzt` : diff < -300 ? `, davon ${fmt(-diff / 1000)} Kilometer Umweg` : "";
+      speak(`Ziel erreicht. Du bist ${ranKm} Kilometer gelaufen${extraSpoken}. Stark!`);
+      vibrate([200, 100, 200, 100, 400]);
+    }
     return;
   }
   const phrase = stepPhrase(next.st);
-  $("navArrow").textContent = (MANEUVER[next.st.type] || ["⬆"])[0];
+  setArrow((MANEUVER[next.st.type] || ["⬆"])[0]);
   $("navDist").textContent = fmtDist(next.dist);
   $("navText").textContent = phrase;
-  $("navInfo").textContent = `Noch ${fmtDist(remaining)} · ${fmt(pos / 1000)} km gelaufen`;
+  $("navInfo").textContent = `Noch ${fmtDist(remaining)} · ${ranKm} km gelaufen`;
 
   // Sprachansagen: einmal vorher, einmal direkt am Abzweig
   const key = next.k;
@@ -513,9 +570,8 @@ function updateNav(p){
     nav.spoken["f" + key] = true;
     speak(next.st.type === 10 ? `Noch ${spokenDist(next.dist).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} bis zum Ziel` : `In ${spokenDist(next.dist)} ${phrase.charAt(0).toLowerCase() + phrase.slice(1)}`);
   }
-  // Kilometer-Ansage
-  const kmDone = Math.floor(pos / 1000);
-  if (kmDone > nav.km){ nav.km = kmDone; if (remaining > 300) speak(`${kmDone} ${kmDone === 1 ? "Kilometer" : "Kilometer"} geschafft, noch ${fmt(remaining / 1000)} Kilometer.`); }
+  // Kilometer-Ansage nach tatsächlich gelaufener Strecke
+  if (nav.kmPending){ nav.kmPending = false; if (remaining > 300) speak(`${nav.km} Kilometer gelaufen, noch ${fmt(remaining / 1000)} Kilometer.`); }
 }
 
 function stopNav(silent){
@@ -841,7 +897,108 @@ function roundness(coords, total){
   return Math.min(1, Math.abs(area / 2) * 4 * Math.PI / (total * total));
 }
 
+// ---------- Stichwege entfernen ----------
+// openrouteservice legt bei Rundkursen Zwischenpunkte auf einen Kreis. Landet einer davon auf einem
+// Stichweg oder neben dem Weg, läuft die Route hinein und auf demselben Weg wieder heraus.
+// Solche "Ausbuchtungen" (bis 1,2 km hin+zurück) werden hier herausgeschnitten; Abbiegehinweise,
+// Distanz und Wegarten-Anteile werden passend umgerechnet.
+const SPUR_MAX = 1200, SPUR_MIN = 40, SPUR_TINY_LOOP = 300;
+function turnType(inB, outB){
+  const d = ((outB - inB + 540) % 360) - 180, a = Math.abs(d);
+  if (a < 25) return null;                       // geradeaus – kein Hinweis nötig
+  if (a < 60) return d > 0 ? 5 : 4;              // halb rechts / halb links
+  if (a < 135) return d > 0 ? 1 : 0;             // rechts / links
+  return d > 0 ? 3 : 2;                          // scharf rechts / links
+}
+function pruneSpurs(feature){
+  const P = feature.properties || {};
+  let C = feature.geometry.coordinates.slice();
+  const ll = c => [c[1], c[0]];
+  const hv = (a, b) => haversine(ll(a), ll(b));
+  let steps = [];
+  (P.segments || []).forEach(seg => (seg.steps || []).forEach(st => steps.push(Object.assign({}, st, { way_points: (st.way_points || [0, 0]).slice() }))));
+  const extras = {};
+  Object.keys(P.extras || {}).forEach(k => { const e = P.extras[k]; extras[k] = { values: (e.values || []).map(v => v.slice()), summary: e.summary, hadValues: !!e.values }; });
+  let removed = 0, removedM = 0;
+  const origLen = (P.summary && P.summary.distance) || 0;
+
+  // Läuft der Abschnitt i..j überwiegend auf sich selbst zurück (hin und zurück auf demselben Weg)?
+  function outAndBack(i, j){
+    const pts = []; let d = 0, next = 0;
+    for (let k = i + 1; k <= j; k++){
+      const a = ll(C[k-1]), b = ll(C[k]), seg = haversine(a, b);
+      while (seg > 0 && next <= d + seg){ const t = (next - d) / seg; pts.push([a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, next]); next += 10; }
+      d += seg;
+    }
+    if (pts.length < 4) return true;
+    let doubled = 0;
+    for (const p of pts) if (pts.some(q => Math.abs(q[2] - p[2]) > 30 && haversine(p, q) < 15)) doubled++;
+    return doubled / pts.length >= 0.6;
+  }
+  function bearingAt(idx, dir){
+    // Richtung über ~20 m vor (dir = -1) bzw. nach (dir = +1) dem Punkt
+    let k = idx, d = 0;
+    while (k + dir >= 0 && k + dir < C.length && d < 20){ d += hv(C[k], C[k + dir]); k += dir; }
+    if (k === idx) return null;
+    return dir < 0 ? bearing(ll(C[k]), ll(C[idx])) : bearing(ll(C[idx]), ll(C[k]));
+  }
+  function cut(i, j){
+    const shift = j - i, m = k => k <= i ? k : k <= j ? i : k - shift;
+    // Name des Weges, auf dem es nach dem Stichweg weitergeht
+    const exit = steps.find(st => st.way_points[0] >= j);
+    C.splice(i + 1, shift);
+    // Hinweise im Stichweg (inkl. Einbiegen und Zurückkommen) entfernen
+    steps = steps.filter(st => !(st.way_points[0] >= i && st.way_points[0] <= j) || st.type === 10 || st.type === 11)
+                 .map(st => Object.assign(st, { way_points: [m(st.way_points[0]), m(st.way_points[1])] }));
+    // neuen Abbiegehinweis an der Schnittstelle aus der tatsächlichen Richtung berechnen
+    const inB = bearingAt(i, -1), outB = bearingAt(i, +1);
+    const type = inB !== null && outB !== null ? turnType(inB, outB) : null;
+    if (type !== null && i > 0){
+      steps.push({ type, instruction: "", name: exit && exit.name ? exit.name : "-", way_points: [i, i] });
+      steps.sort((a, b) => a.way_points[0] - b.way_points[0]);
+    }
+    Object.values(extras).forEach(e => { e.values = e.values.map(v => [m(v[0]), m(v[1]), v[2]]).filter(v => v[1] > v[0]); });
+  }
+
+  for (let i = 1, guard = 0; i < C.length - 2 && guard < 5000; i++, guard++){
+    let along = 0, best = -1, bestAlong = 0;
+    for (let j = i + 1; j < C.length - 1; j++){
+      along += hv(C[j-1], C[j]);
+      if (along > SPUR_MAX) break;
+      // Stichwege kehren zum selben Kartenpunkt (der Weggabelung) zurück – nur dann wird geschnitten,
+      // sonst entstünde eine Verbindung quer durchs Gelände
+      if (along >= SPUR_MIN && hv(C[i], C[j]) < 4){ best = j; bestAlong = along; }
+    }
+    if (best < 0) continue;
+    if (bestAlong <= SPUR_TINY_LOOP || outAndBack(i, best)){
+      cut(i, best); removed++; removedM += bestAlong;
+      i = Math.max(0, i - 3);                    // Umgebung erneut prüfen (verschachtelte Stichwege)
+    }
+  }
+  if (!removed) return { feature, removed: 0, removedM: 0 };
+
+  // Distanz, Höhenmeter-Schätzung und Wegarten-Anteile neu berechnen
+  const cumC = [0]; for (let k = 1; k < C.length; k++) cumC.push(cumC[k-1] + hv(C[k-1], C[k]));
+  const len = cumC[cumC.length - 1];
+  const newExtras = {};
+  Object.keys(extras).forEach(k => {
+    const e = extras[k];
+    if (!e.hadValues){ newExtras[k] = { summary: (e.summary || []).map(x => Object.assign({}, x, { distance: x.distance * (origLen ? len / origLen : 1) })) }; return; }
+    const sum = {};
+    e.values.forEach(v => { sum[v[2]] = (sum[v[2]] || 0) + (cumC[Math.min(v[1], C.length - 1)] - cumC[Math.min(v[0], C.length - 1)]); });
+    newExtras[k] = { values: e.values, summary: Object.keys(sum).map(val => ({ value: Number(val), distance: sum[val], amount: len ? sum[val] / len * 100 : 0 })) };
+  });
+  const props = Object.assign({}, P, {
+    summary: Object.assign({}, P.summary, { distance: len }),
+    ascent: Math.round((P.ascent || 0) * (origLen ? len / origLen : 1)),
+    segments: [{ steps }], extras: newExtras
+  });
+  return { feature: { type: "Feature", geometry: { type: "LineString", coordinates: C }, properties: props }, removed, removedM };
+}
+
 function analyse(feature){
+  const pruned = pruneSpurs(feature);
+  feature = pruned.feature;
   const p = feature.properties;
   const total = p.summary.distance;
   const share = { nature:0, street:0, cycle:0, main:0, unknown:0 };
@@ -866,7 +1023,7 @@ function analyse(feature){
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
     unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges, crossPts: cross, crossCount: cross.length, round, cum,
-    clean: cross.length === 0 && ov.share < 0.05, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    clean: cross.length === 0 && ov.share < 0.05, spursRemoved: pruned.removed, spurM: pruned.removedM, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
     ascent: Math.round(p.ascent || 0), coords, steps
   };
 }
@@ -1015,6 +1172,7 @@ function render(){
         <span>✕ ${r.crossCount} Kreuzung${r.crossCount === 1 ? "" : "en"}</span>
       </div>
       ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
+      ${r.spursRemoved ? `<div class="hint">✂ ${r.spursRemoved === 1 ? "Ein Stichweg" : r.spursRemoved + " Stichwege"} (hin und gleich zurück) automatisch entfernt.</div>` : ""}
       ${r.relaxed && !r.outside ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
       <div class="actions">
         <button class="primary" data-a="run">▶ Navigation starten</button>
@@ -1230,7 +1388,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
