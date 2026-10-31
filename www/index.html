@@ -204,9 +204,9 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 /* ---------- Konstanten ---------- */
 const ORS = "https://api.openrouteservice.org";
 const TOL_KM = 2;              // erlaubte Abweichung (±2 km)
-const MAX_REQUESTS = 30;       // Obergrenze API-Aufrufe pro Suche
+const MAX_REQUESTS = 20;       // Obergrenze API-Aufrufe pro Suche (schont das Tageskontingent)
 const WANT_RESULTS = 6;
-const REQ_GAP_MS = 1600;       // kostenloses Kontingent: 40 Anfragen/Minute
+const REQ_GAP_MS = 2000;       // kostenloses Kontingent: max. 40 Anfragen/Minute
 
 // openrouteservice waytype-Codes
 const WT = {0:"unknown",1:"main",2:"main",3:"street",4:"nature",5:"nature",6:"cycle",7:"nature",8:"nature",9:"street",10:"street"};
@@ -617,6 +617,7 @@ function getKey(){ return store.get("orsKey", "").trim(); }
 function askKey(){
   return new Promise(res => {
     $("keyInput").value = getKey();
+    $("keyTestOut").textContent = usageText();
     $("keyModal").style.display = "flex";
     $("keySave").onclick = () => { store.set("orsKey", $("keyInput").value.trim()); $("keyModal").style.display = "none"; res(getKey()); };
     $("keyCancel").onclick = () => { $("keyModal").style.display = "none"; res(getKey()); };
@@ -632,6 +633,7 @@ $("keyTest").onclick = async () => {
   const c = start || map.getCenter();
   const lines = [];
   const log = t => { lines.push(t); out.textContent = lines.join("\n"); };
+  log(usageText());
   log(`Teste ab ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)} …`);
   const tests = [["foot-walking", false, "Rundkurs normal"], ["foot-hiking", true, "Rundkurs Wald/grün"]];
   for (const [prof, nat, label] of tests){
@@ -640,9 +642,15 @@ $("keyTest").onclick = async () => {
       const f = await orsRoundTrip(prof, 5000, 4, 1, nat, { lat: c.lat, lng: c.lng });
       const d = f ? f.properties.summary.distance / 1000 : 0;
       log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
-    } catch(e){ log(`❌ ${label}: ${e.message}`); }
+    } catch(e){
+      log(`❌ ${label}: ${e.message}`);
+      if (e.code === "quota") { log("→ Der Schlüssel ist in Ordnung, aber das Kontingent ist verbraucht. Es wird automatisch zurückgesetzt (meist nach 24 Std.). Den Stand siehst du auch im openrouteservice-Dashboard."); break; }
+      if (e.code === "key") { log("→ Schlüssel prüfen: im openrouteservice-Dashboard kopieren und ohne Leerzeichen einfügen."); break; }
+      if (e.code === "rate") { log("→ Zu viele Anfragen in kurzer Zeit – 1 Minute warten und erneut testen."); break; }
+    }
     await sleep(1200);
   }
+  log(usageText().split("\n")[0]);
   if (!old) store.set("orsKey", key);
 };
 
@@ -650,11 +658,36 @@ $("keyTest").onclick = async () => {
 // Gewichtung "grün/ruhig": Werte 0…1 (v2-Format). Falls der Server eine Variante ablehnt,
 // wird automatisch die nächst einfachere probiert: beide → nur ruhig → ohne.
 const WEIGHT_MODES = [{ green: 1, quiet: 1 }, { quiet: 1 }, null];
-let weightMode = 0;
+let weightMode = Math.min(2, Number(store.get("weightMode", "0")) || 0);   // gemerkt, damit keine Anfragen für abgelehnte Varianten verschwendet werden
 
+// Verbrauch mitzählen (Tageskontingent kostenlos: 2000 Routen/Tag)
+function usage(){ const today = new Date().toDateString(); let u; try { u = JSON.parse(store.get("usage", "{}")); } catch(e){ u = {}; } return u.day === today ? u : { day: today, n: 0 }; }
+function countRequest(r){
+  const u = usage(); u.n++;
+  try {
+    const rem = r && r.headers && r.headers.get && r.headers.get("x-ratelimit-remaining");
+    const reset = r && r.headers && r.headers.get && r.headers.get("x-ratelimit-reset");
+    if (rem !== null && rem !== undefined && rem !== "") u.remaining = Number(rem);
+    if (reset) u.reset = Number(reset) * (Number(reset) < 1e12 ? 1000 : 1);
+  } catch(e){}
+  store.set("usage", JSON.stringify(u));
+}
+function usageText(){
+  const u = usage();
+  let t = `Heute verbraucht: ${u.n} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).`;
+  if (typeof u.remaining === "number" && isFinite(u.remaining)) t += `\nLaut Routendienst noch übrig: ${u.remaining}.`;
+  if (u.reset && u.reset > Date.now()) t += `\nKontingent wird zurückgesetzt: ${new Date(u.reset).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}.`;
+  return t;
+}
+
+// openrouteservice antwortet mit 403 sowohl bei falschem Schlüssel als auch bei aufgebrauchtem Kontingent –
+// deshalb wird die Meldung des Servers ausgewertet und angezeigt.
 function orsError(status, msg){
-  if (status === 401 || status === 403) return Object.assign(new Error("API-Schlüssel abgelehnt"), { code: "key" });
-  if (status === 429) return Object.assign(new Error("Zu viele Anfragen"), { code: "rate" });
+  const m = msg ? ` (Server: ${msg})` : "";
+  if ((status === 403 || status === 429) && /quota|limit|exceed|rate/i.test(msg || ""))
+    return Object.assign(new Error("Kontingent des Routendienstes aufgebraucht" + m), { code: status === 429 ? "rate" : "quota" });
+  if (status === 401 || status === 403) return Object.assign(new Error("API-Schlüssel abgelehnt" + m), { code: "key" });
+  if (status === 429) return Object.assign(new Error("Zu viele Anfragen pro Minute" + m), { code: "rate" });
   return Object.assign(new Error(msg || ("HTTP " + status)), { code: "api", status });
 }
 
@@ -673,11 +706,17 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
       body: JSON.stringify(body)
     });
   } catch(e){ throw Object.assign(new Error("Keine Verbindung zum Routendienst (" + (e && e.message || e) + ")"), { code: "net" }); }
+  countRequest(r);
   let j = null, msg = "";
-  try { j = await r.json(); msg = j && j.error ? (j.error.message || JSON.stringify(j.error)) : ""; } catch(e){}
+  try {
+    const txt = await r.text();
+    try { j = JSON.parse(txt); } catch(e){ msg = txt.slice(0, 160); }
+    if (j && j.error) msg = typeof j.error === "string" ? j.error : (j.error.message || JSON.stringify(j.error));
+    else if (j && j.message && !r.ok) msg = j.message;
+  } catch(e){}
   if (!r.ok){
     if (r.status === 400 && w && weightMode < WEIGHT_MODES.length - 1){
-      weightMode++;   // einfachere Gewichtung versuchen
+      weightMode++; store.set("weightMode", String(weightMode));   // einfachere Gewichtung versuchen
       return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
     }
     throw orsError(r.status, msg);
@@ -857,14 +896,15 @@ async function search(){
   setProgress(0.02);
 
   const found = [], near = [];
-  let requests = 0, okCount = 0, errCount = 0, lastErr = "";
+  let requests = 0, okCount = 0, errCount = 0, lastErr = "", stopped = "", rateWaits = 0;
   // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
   const phases = [
-    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 22 },
+    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 15 },
     { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege", budget: 99 }
   ];
   try {
     for (const ph of phases){
+      if (stopped) break;
       const cleanN = () => found.filter(r => r.clean).length;
       if (!ph.nature && found.length >= 3 && cleanN() >= 1) break;
       // Längenfaktor je Profil: openrouteservice liefert oft deutlich längere/kürzere Runden als angefragt
@@ -872,7 +912,7 @@ async function search(){
       let factor = Number(store.get(fKey, "0.75")) || 0.75;
       let tries = 0;
       // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
-      while (tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
+      while (!stopped && tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
         tries++; requests++;
         status(`${ph.label} … ${found.length} passende Runde${found.length === 1 ? "" : "n"} (Versuch ${requests}/${MAX_REQUESTS})`);
         setProgress(requests / MAX_REQUESTS);
@@ -883,8 +923,13 @@ async function search(){
         try { f = await orsRoundTrip(ph.profile, target * 1000 * factor * jitter, points, seed, ph.nature); }
         catch(e){
           errCount++; lastErr = e.message;
-          if (e.code === "key"){ status("Der API-Schlüssel wurde abgelehnt. Bitte unter ⚙️ prüfen."); return; }
-          if (e.code === "rate"){ status("Tageslimit oder Minutenlimit erreicht – kurz warten …"); await sleep(10000); continue; }
+          if (e.code === "key"){ stopped = "key"; break; }
+          if (e.code === "quota"){ stopped = "quota"; break; }
+          if (e.code === "rate"){
+            if (++rateWaits > 2){ stopped = "rate"; break; }
+            for (let sec = 30; sec > 0 && searching; sec--){ status(`Minutenlimit des Routendienstes erreicht – geht in ${sec} s weiter …`); await sleep(1000); }
+            continue;
+          }
           if (e.code === "net"){ status(e.message + " – Internet prüfen."); return; }
           // Bei 4 Fehlern ohne einen einzigen Erfolg abbrechen und den Grund zeigen
           if (okCount === 0 && errCount >= 4){ status("Der Routendienst meldet einen Fehler: " + lastErr); return; }
@@ -911,14 +956,18 @@ async function search(){
       }
       store.set(fKey, String(factor));
     }
+    const stopNote = stopped === "quota" ? "Das Tageskontingent des Routendienstes ist aufgebraucht. Mehr Routen gibt es nach dem Zurücksetzen – Details unter ⚙️."
+                   : stopped === "key" ? lastErr + " – bitte unter ⚙️ prüfen."
+                   : stopped === "rate" ? "Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen." : "";
+    if (stopped && !found.length && !near.length){ status(stopNote + (stopped === "quota" ? " " + lastErr.replace(/^Kontingent des Routendienstes aufgebraucht ?/, "") : "")); return; }
     if (!found.length){
       if (!okCount){ status("Der Routendienst hat keine Route geliefert" + (lastErr ? ": " + lastErr : ".")); return; }
       // Nichts im Toleranzbereich → die 3 nächstgelegenen trotzdem zeigen
       near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
       results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
       addHistory(target);
-      status(`Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
-    } else { addHistory(target); status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.`); }
+      status(stopped ? stopNote + " Bisher gefunden: die nächstgelegenen Runden." : `Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
+    } else { addHistory(target); status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.` + (stopped ? " ⚠ Suche vorzeitig beendet: " + stopNote : "")); }
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
 }
 $("go").onclick = search;
