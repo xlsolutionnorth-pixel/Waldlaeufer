@@ -75,6 +75,17 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 .modal .btns button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px}
 .modal .btns button.primary{background:var(--forest);border-color:var(--forest);color:#fff}
 .modal a{color:var(--forest-2)}
+.nav{position:absolute;z-index:1100;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;display:none;
+  background:#1f3d2b;color:#fff;border-radius:18px;box-shadow:0 4px 18px rgba(0,0,0,.35);padding:12px 12px 10px}
+.nav .main{display:flex;align-items:center;gap:12px}
+.nav .arrow{width:60px;height:60px;min-width:60px;border-radius:14px;background:rgba(255,255,255,.14);display:grid;place-items:center;font-size:36px;line-height:1}
+.nav .ndist{font-size:28px;font-weight:750;letter-spacing:-.01em}
+.nav .ntext{font-size:15px;opacity:.92;line-height:1.3}
+.nav .nfoot{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;opacity:.9}
+.nav .nfoot span{flex:1}
+.nav .nfoot button{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:10px;padding:8px 12px;font-size:14px}
+.nav.off{background:#a3402f}
+body.navigating .topbar,body.navigating #suggest{display:none}
 .me-dot{width:16px;height:16px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 6px rgba(42,125,225,.25)}
 .start-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .leaflet-control-layers{border-radius:12px!important}
@@ -83,6 +94,18 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 </head>
 <body>
 <div id="map"></div>
+
+<div class="nav" id="nav">
+  <div class="main">
+    <div class="arrow" id="navArrow">⬆</div>
+    <div><div class="ndist" id="navDist">–</div><div class="ntext" id="navText">GPS wird gesucht …</div></div>
+  </div>
+  <div class="nfoot">
+    <span id="navInfo"></span>
+    <button id="navMute">🔊</button>
+    <button id="navEnd">Beenden</button>
+  </div>
+</div>
 
 <div class="topbar">
   <div class="search">
@@ -108,7 +131,7 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
       </div>
       <button class="go" id="go">Routen suchen</button>
     </div>
-    <p class="hint">Es werden nur Runden mit ±1 km Abweichung angezeigt.</p>
+    <p class="hint">Es werden Runden mit ±2 km Abweichung angezeigt.</p>
     <div class="progress" id="prog"><i></i></div>
     <div id="status"></div>
     <div id="results"></div>
@@ -121,6 +144,8 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
     <p>Die App berechnet Routen über den kostenlosen Dienst <b>openrouteservice</b> (OpenStreetMap-Daten, kennt Wald- und Feldwege). Erstelle dort ein kostenloses Konto und kopiere deinen Schlüssel hier hinein:<br>
       <a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener">openrouteservice.org/dev</a></p>
     <input id="keyInput" placeholder="Schlüssel einfügen" autocomplete="off" spellcheck="false">
+    <button id="keyTest" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🔧 Verbindung testen</button>
+    <pre id="keyTestOut" style="white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8px 0 0;max-height:30vh;overflow:auto"></pre>
     <div class="btns">
       <button id="keyCancel">Abbrechen</button>
       <button class="primary" id="keySave">Speichern</button>
@@ -134,8 +159,8 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 
 /* ---------- Konstanten ---------- */
 const ORS = "https://api.openrouteservice.org";
-const TOL_KM = 1;              // erlaubte Abweichung
-const MAX_REQUESTS = 18;       // Obergrenze API-Aufrufe pro Suche
+const TOL_KM = 2;              // erlaubte Abweichung (±2 km)
+const MAX_REQUESTS = 24;       // Obergrenze API-Aufrufe pro Suche
 const WANT_RESULTS = 6;
 const REQ_GAP_MS = 1600;       // kostenloses Kontingent: 40 Anfragen/Minute
 
@@ -183,7 +208,7 @@ function setStart(lat, lng, label){
   $("startinfo").innerHTML = `⛳ <span><b>Start:</b> ${label ? escapeHtml(label) : lat.toFixed(5) + ", " + lng.toFixed(5)}</span>`;
   clearRoutes();
 }
-map.on("click", e => setStart(e.latlng.lat, e.latlng.lng));
+map.on("click", e => { if (!nav.active) setStart(e.latlng.lat, e.latlng.lng); });
 
 /* ---------- Bottom-Sheet ---------- */
 const sheetSizes = ["46vh", "78vh", "22vh"];
@@ -224,25 +249,187 @@ function showMe(lat, lng){
   else meMarker.setLatLng([lat, lng]);
 }
 
-async function toggleFollow(btn){
-  if (watchId !== null){ stopFollow(); btn.textContent = "▶ Lauf starten"; return; }
-  btn.textContent = "■ Lauf beenden";
-  const P = geoPlugin();
-  const cb = (lat, lng) => { showMe(lat, lng); map.panTo([lat, lng]); };
-  if (P){
-    try { await P.requestPermissions(); } catch(e){}
-    watchId = await P.watchPosition({ enableHighAccuracy:true }, (p) => { if (p) cb(p.coords.latitude, p.coords.longitude); });
-  } else if (navigator.geolocation){
-    watchId = navigator.geolocation.watchPosition(p => cb(p.coords.latitude, p.coords.longitude), () => {}, { enableHighAccuracy:true });
+/* ---------- Abbiege-Navigation ---------- */
+// openrouteservice-Manövertypen → Pfeil + kurze Ansage
+const MANEUVER = {
+  0:["⬅","links abbiegen"], 1:["➡","rechts abbiegen"], 2:["↙","scharf links abbiegen"], 3:["↘","scharf rechts abbiegen"],
+  4:["↖","halb links halten"], 5:["↗","halb rechts halten"], 6:["⬆","geradeaus weiter"], 7:["⟳","in den Kreisverkehr"],
+  8:["⟳","Kreisverkehr verlassen"], 9:["↩","umdrehen"], 10:["🏁","Ziel erreicht"], 11:["⬆","Los geht's"],
+  12:["↖","links halten"], 13:["↗","rechts halten"]
+};
+const ANNOUNCE_FAR = 120, ANNOUNCE_NOW = 25, OFF_ROUTE_M = 45;
+
+const nav = { active:false, route:null, cum:null, idx:0, watch:null, spoken:{}, km:0, offSince:0, offSaid:false, muted:false, wake:null, lastFix:0 };
+try { nav.muted = store.get("muted", "0") === "1"; } catch(e){}
+
+function speak(text){
+  if (nav.muted || !text) return;
+  const T = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech;
+  if (T){ T.speak({ text, lang:"de-DE", rate:1.0, queueStrategy:1 }).catch(() => {}); return; }
+  try { const u = new SpeechSynthesisUtterance(text); u.lang = "de-DE"; speechSynthesis.speak(u); } catch(e){}
+}
+function vibrate(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
+
+function cumulative(coords){
+  const c = [0];
+  for (let i = 1; i < coords.length; i++) c.push(c[i-1] + haversine(coords[i-1], coords[i]));
+  return c;
+}
+
+// Abstand Punkt → Segment (in Metern, lokal flach gerechnet) und Position auf dem Segment
+function projectOnSegment(p, a, b){
+  const kx = 111320 * Math.cos(p[0] * Math.PI / 180), ky = 110540;
+  const ax = (a[1]-p[1])*kx, ay = (a[0]-p[0])*ky, bx = (b[1]-p[1])*kx, by = (b[0]-p[0])*ky;
+  const dx = bx-ax, dy = by-ay, len2 = dx*dx + dy*dy;
+  let t = len2 ? -(ax*dx + ay*dy) / len2 : 0; t = Math.max(0, Math.min(1, t));
+  const x = ax + t*dx, y = ay + t*dy;
+  return { d: Math.sqrt(x*x + y*y), t };
+}
+
+// Nächstgelegene Stelle auf der Route suchen – bevorzugt vorwärts, damit Start = Ziel nicht verwechselt wird
+function locate(p){
+  const C = nav.route.coords, cum = nav.cum;
+  let best = { d: Infinity, pos: cum[nav.idx], idx: nav.idx };
+  const scan = (from, to) => {
+    for (let i = Math.max(0, from); i < Math.min(C.length - 1, to); i++){
+      const pr = projectOnSegment(p, C[i], C[i+1]);
+      if (pr.d < best.d) best = { d: pr.d, idx: i, pos: cum[i] + pr.t * (cum[i+1] - cum[i]) };
+    }
+  };
+  // Fenster: kurz zurück bis ~1,5 km voraus
+  let ahead = nav.idx; while (ahead < C.length - 1 && cum[ahead] - cum[nav.idx] < 1500) ahead++;
+  scan(nav.idx - 3, ahead + 1);
+  if (best.d > OFF_ROUTE_M){
+    // Weit weg → gesamte restliche Route absuchen (nicht zurück vor die bisher gelaufene Strecke)
+    const keep = best; best = { d: Infinity };
+    let back = nav.idx; while (back > 0 && cum[nav.idx] - cum[back] < 150) back--;
+    scan(back, C.length);
+    if (!(best.d < keep.d)) best = keep;
   }
+  return best;
+}
+
+function fmtDist(m){ return m >= 1000 ? fmt(m / 1000) + " km" : (Math.round(m / 10) * 10) + " m"; }
+function spokenDist(m){ return m >= 1000 ? fmt(m / 1000) + " Kilometern" : (Math.round(m / 10) * 10) + " Metern"; }
+
+function stepPhrase(st){
+  const m = MANEUVER[st.type] || ["⬆", ""];
+  if (st.type === 10) return "Ziel erreicht";
+  let txt = m[1];
+  if (st.name && st.type !== 6) txt += " auf " + st.name;
+  // Kreisverkehr: ORS-Text enthält die Ausfahrt – den lieber direkt nehmen
+  if (st.type === 7 && st.text) txt = st.text;
+  return txt.charAt(0).toUpperCase() + txt.slice(1);
+}
+
+async function startNav(r){
+  if (nav.active) stopNav(true);
+  if (!r.steps || !r.steps.length){ status("Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen."); return; }
+  Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0 });
+  document.body.classList.add("navigating");
+  $("nav").style.display = "block"; $("nav").classList.remove("off");
+  $("navMute").textContent = nav.muted ? "🔇" : "🔊";
+  $("navArrow").textContent = "⬆"; $("navDist").textContent = fmtDist(nav.cum[nav.cum.length - 1]);
+  $("navText").textContent = "GPS wird gesucht …"; $("navInfo").textContent = "";
   setSheet(2);
-}
-function stopFollow(){
+  map.setView(r.coords[0], 17);
+  try { if (navigator.wakeLock) nav.wake = await navigator.wakeLock.request("screen"); } catch(e){}
+  speak(`Navigation gestartet. Runde ${fmt(r.distKm)} Kilometer. Viel Spaß!`);
+
+  const onPos = (c) => {
+    if (!nav.active || !c) return;
+    if (c.accuracy && c.accuracy > 60) { $("navInfo").textContent = `GPS ungenau (±${Math.round(c.accuracy)} m)`; return; }
+    updateNav([c.latitude, c.longitude]);
+  };
   const P = geoPlugin();
-  if (watchId === null) return;
-  if (P) P.clearWatch({ id: watchId }); else navigator.geolocation.clearWatch(watchId);
-  watchId = null;
+  try {
+    if (P){
+      try { await P.requestPermissions(); } catch(e){}
+      nav.watch = await P.watchPosition({ enableHighAccuracy:true, timeout:20000, maximumAge:0 }, (p) => p && onPos(p.coords));
+    } else if (navigator.geolocation){
+      nav.watch = navigator.geolocation.watchPosition(p => onPos(p.coords), () => {}, { enableHighAccuracy:true, maximumAge:0 });
+    }
+  } catch(e){ $("navText").textContent = "Kein GPS – bitte Standort-Berechtigung prüfen."; }
 }
+
+function updateNav(p){
+  showMe(p[0], p[1]);
+  map.panTo(p, { animate:true });
+  const r = nav.route, cum = nav.cum, total = cum[cum.length - 1];
+  const loc = locate(p);
+
+  // Abseits der Route?
+  const box = $("nav");
+  if (loc.d > OFF_ROUTE_M){
+    if (!nav.offSince) nav.offSince = Date.now();
+    if (Date.now() - nav.offSince > 8000){
+      box.classList.add("off");
+      $("navArrow").textContent = "⚠";
+      $("navDist").textContent = fmtDist(loc.d);
+      $("navText").textContent = "Abseits der Route – zurück zur markierten Linie";
+      if (!nav.offSaid){ speak("Du hast die Route verlassen."); vibrate([300, 150, 300]); nav.offSaid = true; }
+      return;
+    }
+  } else {
+    if (nav.offSaid) speak("Wieder auf der Route.");
+    nav.offSince = 0; nav.offSaid = false; box.classList.remove("off");
+    if (loc.pos >= cum[nav.idx] - 30) nav.idx = loc.idx;   // nur vorwärts übernehmen
+  }
+  const pos = Math.max(loc.pos, cum[nav.idx]);
+
+  // Nächstes Manöver (Geradeaus-Hinweise überspringen)
+  let next = null;
+  for (let k = 0; k < r.steps.length; k++){
+    const st = r.steps[k];
+    if (st.type === 6 || st.type === 11) continue;
+    if (cum[Math.min(st.wp, cum.length - 1)] > pos + 8){ next = { k, st, dist: cum[Math.min(st.wp, cum.length - 1)] - pos }; break; }
+  }
+  const remaining = Math.max(0, total - pos);
+
+  if (!next || remaining < 25){
+    $("navArrow").textContent = "🏁"; $("navDist").textContent = "Ziel"; $("navText").textContent = "Runde geschafft!";
+    $("navInfo").textContent = `${fmt(total / 1000)} km gelaufen`;
+    if (!nav.spoken.goal && remaining < 40){ nav.spoken.goal = true; speak(`Ziel erreicht. Du bist ${fmt(total / 1000)} Kilometer gelaufen. Stark!`); vibrate([200, 100, 200, 100, 400]); }
+    return;
+  }
+  const phrase = stepPhrase(next.st);
+  $("navArrow").textContent = (MANEUVER[next.st.type] || ["⬆"])[0];
+  $("navDist").textContent = fmtDist(next.dist);
+  $("navText").textContent = phrase;
+  $("navInfo").textContent = `Noch ${fmtDist(remaining)} · ${fmt(pos / 1000)} km gelaufen`;
+
+  // Sprachansagen: einmal vorher, einmal direkt am Abzweig
+  const key = next.k;
+  if (next.dist <= ANNOUNCE_NOW && !nav.spoken["n" + key]){
+    nav.spoken["n" + key] = nav.spoken["f" + key] = true;
+    if (next.st.type !== 10){ speak("Jetzt " + phrase.charAt(0).toLowerCase() + phrase.slice(1)); vibrate(400); }
+  } else if (next.dist <= ANNOUNCE_FAR && next.dist > ANNOUNCE_NOW + 30 && !nav.spoken["f" + key]){
+    nav.spoken["f" + key] = true;
+    speak(next.st.type === 10 ? `Noch ${spokenDist(next.dist).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} bis zum Ziel` : `In ${spokenDist(next.dist)} ${phrase.charAt(0).toLowerCase() + phrase.slice(1)}`);
+  }
+  // Kilometer-Ansage
+  const kmDone = Math.floor(pos / 1000);
+  if (kmDone > nav.km){ nav.km = kmDone; if (remaining > 300) speak(`${kmDone} ${kmDone === 1 ? "Kilometer" : "Kilometer"} geschafft, noch ${fmt(remaining / 1000)} Kilometer.`); }
+}
+
+function stopNav(silent){
+  const P = geoPlugin();
+  if (nav.watch !== null && nav.watch !== undefined){
+    try { if (P) P.clearWatch({ id: nav.watch }); else navigator.geolocation.clearWatch(nav.watch); } catch(e){}
+  }
+  nav.watch = null; nav.active = false;
+  try { nav.wake && nav.wake.release(); } catch(e){} nav.wake = null;
+  document.body.classList.remove("navigating");
+  $("nav").style.display = "none";
+  setSheet(0);
+  if (!silent) speak("Navigation beendet.");
+}
+$("navEnd").onclick = () => stopNav();
+$("navMute").onclick = () => { nav.muted = !nav.muted; store.set("muted", nav.muted ? "1" : "0"); $("navMute").textContent = nav.muted ? "🔇" : "🔊"; };
+// Bildschirm-Sperre geht beim Zurückkehren in die App verloren → neu anfordern
+document.addEventListener("visibilitychange", async () => {
+  if (nav.active && document.visibilityState === "visible" && navigator.wakeLock){ try { nav.wake = await navigator.wakeLock.request("screen"); } catch(e){} }
+});
 
 /* ---------- Suche (Ort / Koordinaten / Google-Maps-Link) ---------- */
 let sugTimer;
@@ -310,32 +497,65 @@ function askKey(){
 }
 $("setBtn").onclick = askKey;
 
-/* ---------- Routing ---------- */
-let greenSupported = true;
+// Diagnose: prüft Schlüssel, Rundkurs ohne und mit Wald-Gewichtung
+$("keyTest").onclick = async () => {
+  const out = $("keyTestOut"), key = $("keyInput").value.trim();
+  if (!key){ out.textContent = "Bitte zuerst den Schlüssel einfügen."; return; }
+  const old = getKey(); store.set("orsKey", key);
+  const c = start || map.getCenter();
+  const lines = [];
+  const log = t => { lines.push(t); out.textContent = lines.join("\n"); };
+  log(`Teste ab ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)} …`);
+  const tests = [["foot-walking", false, "Rundkurs normal"], ["foot-hiking", true, "Rundkurs Wald/grün"]];
+  for (const [prof, nat, label] of tests){
+    try {
+      weightMode = 0;
+      const f = await orsRoundTrip(prof, 5000, 4, 1, nat, { lat: c.lat, lng: c.lng });
+      const d = f ? f.properties.summary.distance / 1000 : 0;
+      log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
+    } catch(e){ log(`❌ ${label}: ${e.message}`); }
+    await sleep(1200);
+  }
+  if (!old) store.set("orsKey", key);
+};
 
-async function orsRoundTrip(profile, lengthM, points, seed, nature){
-  const options = { round_trip: { length: Math.round(lengthM), points, seed }, avoid_features: ["ferries"] };
-  if (nature){
-    options.profile_params = { weightings: { quiet: { factor: 1 } } };
-    if (greenSupported) options.profile_params.weightings.green = { factor: 1 };
+/* ---------- Routing ---------- */
+// Gewichtung "grün/ruhig": Werte 0…1 (v2-Format). Falls der Server eine Variante ablehnt,
+// wird automatisch die nächst einfachere probiert: beide → nur ruhig → ohne.
+const WEIGHT_MODES = [{ green: 1, quiet: 1 }, { quiet: 1 }, null];
+let weightMode = 0;
+
+function orsError(status, msg){
+  if (status === 401 || status === 403) return Object.assign(new Error("API-Schlüssel abgelehnt"), { code: "key" });
+  if (status === 429) return Object.assign(new Error("Zu viele Anfragen"), { code: "rate" });
+  return Object.assign(new Error(msg || ("HTTP " + status)), { code: "api", status });
+}
+
+async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
+  opts = opts || {};
+  const options = { round_trip: { length: Math.round(lengthM), points, seed } };
+  const w = nature ? WEIGHT_MODES[weightMode] : null;
+  if (w) options.profile_params = { weightings: Object.assign({}, w) };
+  const body = { coordinates: [[(opts.lng ?? start.lng), (opts.lat ?? start.lat)]], options, elevation: true,
+                 extra_info: ["waytype", "surface"], instructions: true, language: "de", units: "m" };
+  let r;
+  try {
+    r = await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
+      method: "POST",
+      headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
+      body: JSON.stringify(body)
+    });
+  } catch(e){ throw Object.assign(new Error("Keine Internetverbindung zum Routendienst"), { code: "net" }); }
+  let j = null, msg = "";
+  try { j = await r.json(); msg = j && j.error ? (j.error.message || JSON.stringify(j.error)) : ""; } catch(e){}
+  if (!r.ok){
+    if (r.status === 400 && w && weightMode < WEIGHT_MODES.length - 1){
+      weightMode++;   // einfachere Gewichtung versuchen
+      return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
+    }
+    throw orsError(r.status, msg);
   }
-  const body = { coordinates: [[start.lng, start.lat]], options, elevation: true,
-                 extra_info: ["waytype", "surface"], instructions: false };
-  const r = await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
-    method: "POST",
-    headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
-    body: JSON.stringify(body)
-  });
-  if (r.status === 400 && nature && greenSupported){
-    // Manche Server kennen die "green"-Gewichtung nicht → ohne erneut versuchen
-    greenSupported = false;
-    return orsRoundTrip(profile, lengthM, points, seed, nature);
-  }
-  if (r.status === 401 || r.status === 403) throw Object.assign(new Error("key"), { code: "key" });
-  if (r.status === 429) throw Object.assign(new Error("rate"), { code: "rate" });
-  if (!r.ok){ let msg = ""; try { msg = (await r.json()).error.message; } catch(e){} throw new Error(msg || ("HTTP " + r.status)); }
-  const j = await r.json();
-  return j.features && j.features[0];
+  return j && j.features && j.features[0];
 }
 
 function analyse(feature){
@@ -348,6 +568,9 @@ function analyse(feature){
   (ex.surface && ex.surface.summary || []).forEach(s => { if (UNPAVED.has(s.value)) unpaved += s.distance; });
   const pct = k => total ? share[k] / total : 0;
   const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
+  const steps = [];
+  (p.segments || []).forEach(seg => (seg.steps || []).forEach(st => steps.push({
+    type: st.type, text: st.instruction || "", name: st.name && st.name !== "-" ? st.name : "", wp: st.way_points ? st.way_points[0] : 0 })));
   // Punkte: Wald-/Feldwege hoch, Hauptstraßen und Radwege abwerten
   const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 20
               - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15;
@@ -355,7 +578,7 @@ function analyse(feature){
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
     unpaved: total ? unpaved / total : 0,
-    ascent: Math.round(p.ascent || 0), coords
+    ascent: Math.round(p.ascent || 0), coords, steps
   };
 }
 
@@ -384,54 +607,67 @@ async function search(){
   clearRoutes(); results = [];
   setProgress(0.02);
 
-  const found = [];
-  let factor = Number(store.get("lenFactor", "0.9")) || 0.9;  // lernt, wie stark ORS über-/unterschreitet
-  let requests = 0;
+  const found = [], near = [];
+  let requests = 0, okCount = 0, errCount = 0, lastErr = "";
   // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
   const phases = [
-    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege" },
-    { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege" }
+    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 16 },
+    { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege", budget: 99 }
   ];
   try {
     for (const ph of phases){
-      if (ph.nature === false && found.length >= 3) break;
-      const budget = ph.nature ? Math.round(MAX_REQUESTS * 0.7) : MAX_REQUESTS - requests;
+      if (!ph.nature && found.length >= 3) break;
+      // Längenfaktor je Profil: openrouteservice liefert oft deutlich längere/kürzere Runden als angefragt
+      const fKey = "lenFactor_" + ph.profile;
+      let factor = Number(store.get(fKey, "0.75")) || 0.75;
       let tries = 0;
-      while (tries < budget && found.length < WANT_RESULTS && requests < MAX_REQUESTS){
+      while (tries < ph.budget && found.length < WANT_RESULTS && requests < MAX_REQUESTS){
         tries++; requests++;
-        status(`${ph.label} … (${found.length} passende Runden, Versuch ${requests})`);
+        status(`${ph.label} … ${found.length} passende Runde${found.length === 1 ? "" : "n"} (Versuch ${requests}/${MAX_REQUESTS})`);
         setProgress(requests / MAX_REQUESTS);
-        const points = [3, 4, 5, 6][requests % 4];
-        const seed = Math.floor(Math.random() * 1000);
+        const points = [4, 3, 5, 4, 6][requests % 5];
+        const seed = Math.floor(Math.random() * 10000);
+        const jitter = 0.92 + Math.random() * 0.16;
         let f;
-        try { f = await orsRoundTrip(ph.profile, target * 1000 * factor, points, seed, ph.nature); }
+        try { f = await orsRoundTrip(ph.profile, target * 1000 * factor * jitter, points, seed, ph.nature); }
         catch(e){
-          if (e.code === "key"){ status("Der API-Schlüssel wurde abgelehnt. Bitte unter ⚙️ prüfen."); return finish(); }
-          if (e.code === "rate"){ status("Kurz zu viele Anfragen – warte …"); await sleep(8000); continue; }
-          if (/too far|exceed|distance/i.test(e.message)) { status("Diese Distanz ist für den Routendienst zu lang."); return finish(); }
+          errCount++; lastErr = e.message;
+          if (e.code === "key"){ status("Der API-Schlüssel wurde abgelehnt. Bitte unter ⚙️ prüfen."); return; }
+          if (e.code === "rate"){ status("Tageslimit oder Minutenlimit erreicht – kurz warten …"); await sleep(10000); continue; }
+          if (e.code === "net"){ status("Keine Verbindung zum Routendienst – Internet prüfen."); return; }
+          // Bei 4 Fehlern ohne einen einzigen Erfolg abbrechen und den Grund zeigen
+          if (okCount === 0 && errCount >= 4){ status("Der Routendienst meldet einen Fehler: " + lastErr); return; }
           await sleep(REQ_GAP_MS); continue;
         }
         if (f){
+          okCount++;
           const r = analyse(f);
           // Längenfaktor nachjustieren, damit die nächsten Versuche näher am Ziel liegen
           const ratio = target / r.distKm;
-          if (isFinite(ratio) && r.distKm > 0.3) factor = Math.min(1.6, Math.max(0.5, factor * (0.5 + 0.5 * ratio)));
-          if (Math.abs(r.distKm - target) <= TOL_KM && !found.some(o => isDuplicate(o, r))){
-            r.relaxed = !ph.nature;
-            found.push(r);
-            found.sort((a, b) => b.score - a.score);
-            results = found.slice(); render();
-          }
+          if (isFinite(ratio) && r.distKm > 0.3) factor = Math.min(1.5, Math.max(0.35, factor * Math.pow(ratio, 0.6)));
+          r.dev = r.distKm - target;
+          r.relaxed = !ph.nature;
+          if (Math.abs(r.dev) <= TOL_KM){
+            if (!found.some(o => isDuplicate(o, r))){
+              found.push(r);
+              // Sortierung: Natur-Anteil zählt am meisten, nähere Distanz leicht bevorzugt
+              found.sort((a, b) => (b.score - Math.abs(b.dev) * 6) - (a.score - Math.abs(a.dev) * 6));
+              results = found.slice(); render();
+            }
+          } else if (!near.some(o => isDuplicate(o, r))) near.push(r);
         }
         await sleep(REQ_GAP_MS);
       }
+      store.set(fKey, String(factor));
     }
-    store.set("lenFactor", String(factor));
-    if (!found.length) status(`Keine Runde mit ${fmt(target)} km ±1 km gefunden. Versuch eine andere Distanz oder einen anderen Startpunkt.`);
-    else status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil.`);
-  } finally { finish(); }
-
-  function finish(){ searching = false; $("go").disabled = false; setProgress(0); }
+    if (!found.length){
+      if (!okCount){ status("Der Routendienst hat keine Route geliefert" + (lastErr ? ": " + lastErr : ".")); return; }
+      // Nichts im Toleranzbereich → die 3 nächstgelegenen trotzdem zeigen
+      near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
+      results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
+      status(`Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
+    } else status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil.`);
+  } finally { searching = false; $("go").disabled = false; setProgress(0); }
 }
 $("go").onclick = search;
 
@@ -470,14 +706,15 @@ function render(){
         <span><i style="background:var(--c-main)"></i>Hauptstraße ${pc(r.main)} %</span>
         <span>unbefestigt ${pc(r.unpaved)} %</span>
       </div>
-      ${r.relaxed ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
+      ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
+      ${r.relaxed && !r.outside ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
       <div class="actions">
-        <button class="primary" data-a="run">▶ Lauf starten</button>
-        <button data-a="gmaps">In Google Maps</button>
+        <button class="primary" data-a="run">▶ Navigation starten</button>
+        <button data-a="gmaps">In Google Maps öffnen</button>
       </div>`;
     c.onclick = (e) => {
       const a = e.target.closest("button") && e.target.closest("button").dataset.a;
-      if (a === "run") return toggleFollow(e.target);
+      if (a === "run") return startNav(r);
       if (a === "gmaps") return openGoogle(r);
       select(i);
     };
@@ -524,7 +761,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { setStart, analyse, isDuplicate, search, get results(){ return results; } };
+window.__app = { setStart, analyse, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
