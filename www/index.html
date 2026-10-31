@@ -563,8 +563,8 @@ let sugTimer;
 $("q").addEventListener("input", () => {
   clearTimeout(sugTimer);
   const v = $("q").value.trim();
-  if (parseCoords(v) || v.length < 3){ $("suggest").style.display = "none"; return; }
-  sugTimer = setTimeout(() => geocode(v), 400);
+  if (parseCoords(v) || v.length < 4){ $("suggest").style.display = "none"; return; }
+  sugTimer = setTimeout(() => geocode(v), 700);
 });
 $("q").addEventListener("keydown", e => {
   if (e.key !== "Enter") return;
@@ -644,7 +644,7 @@ $("keyTest").onclick = async () => {
       log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
     } catch(e){
       log(`❌ ${label}: ${e.message}`);
-      if (e.code === "quota") { log("→ Der Schlüssel ist in Ordnung, aber das Kontingent ist verbraucht. Es wird automatisch zurückgesetzt (meist nach 24 Std.). Den Stand siehst du auch im openrouteservice-Dashboard."); break; }
+      if (e.code === "quota") { log("→ Der Schlüssel ist in Ordnung. Meist ist nur das Minutenlimit (40 Anfragen/Min.) erreicht: 1–2 Minuten warten und erneut testen. Zeigt das openrouteservice-Dashboard bei „Directions V2“ 0 übrig, ist das Tageskontingent verbraucht."); break; }
       if (e.code === "key") { log("→ Schlüssel prüfen: im openrouteservice-Dashboard kopieren und ohne Leerzeichen einfügen."); break; }
       if (e.code === "rate") { log("→ Zu viele Anfragen in kurzer Zeit – 1 Minute warten und erneut testen."); break; }
     }
@@ -924,10 +924,12 @@ async function search(){
         catch(e){
           errCount++; lastErr = e.message;
           if (e.code === "key"){ stopped = "key"; break; }
-          if (e.code === "quota"){ stopped = "quota"; break; }
-          if (e.code === "rate"){
-            if (++rateWaits > 2){ stopped = "rate"; break; }
-            for (let sec = 30; sec > 0 && searching; sec--){ status(`Minutenlimit des Routendienstes erreicht – geht in ${sec} s weiter …`); await sleep(1000); }
+          // "Quota exceeded" kommt beim kostenlosen Zugang auch, wenn nur das Minutenlimit (40/Min.) erreicht ist.
+          // Darum erst eine Minute warten und es erneut versuchen – erst wenn es dann wieder kommt, ist der Tag aufgebraucht.
+          if (e.code === "quota" || e.code === "rate"){
+            if (++rateWaits > 2){ stopped = e.code; break; }
+            for (let sec = 65; sec > 0 && searching; sec--){ status(`Der Routendienst bremst (max. 40 Anfragen pro Minute) – geht in ${sec} s weiter … ${found.length} Runde${found.length === 1 ? "" : "n"} bisher.`); await sleep(1000); }
+            requests--; tries--;   // dieser Versuch zählt nicht
             continue;
           }
           if (e.code === "net"){ status(e.message + " – Internet prüfen."); return; }
@@ -956,7 +958,7 @@ async function search(){
       }
       store.set(fKey, String(factor));
     }
-    const stopNote = stopped === "quota" ? "Das Tageskontingent des Routendienstes ist aufgebraucht. Mehr Routen gibt es nach dem Zurücksetzen – Details unter ⚙️."
+    const stopNote = stopped === "quota" ? "Der Routendienst lehnt weitere Anfragen ab (Kontingent). Bitte in ein paar Minuten nochmal suchen – Stand unter ⚙️."
                    : stopped === "key" ? lastErr + " – bitte unter ⚙️ prüfen."
                    : stopped === "rate" ? "Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen." : "";
     if (stopped && !found.length && !near.length){ status(stopNote + (stopped === "quota" ? " " + lastErr.replace(/^Kontingent des Routendienstes aufgebraucht ?/, "") : "")); return; }
