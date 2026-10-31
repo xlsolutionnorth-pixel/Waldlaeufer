@@ -89,6 +89,11 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 .me-dot{width:16px;height:16px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 6px rgba(42,125,225,.25)}
 .start-pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--accent);border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}
 .leaflet-control-layers{border-radius:12px!important}
+.dir-arrow{width:16px;height:16px;display:grid;place-items:center;pointer-events:none}
+.dir-arrow svg{display:block;filter:drop-shadow(0 0 1px rgba(0,0,0,.6))}
+.km-mark{width:22px;height:22px;border-radius:50%;background:#fff;color:#1d2a22;border:2.5px solid var(--rc,#2f8a4a);
+  font:700 11px/17px system-ui,sans-serif;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);pointer-events:none}
+.km-mark.start{background:#1d2a22;color:#fff;font-size:10px}
 .leaflet-top{top:calc(env(safe-area-inset-top) + 60px)}
 </style>
 </head>
@@ -558,6 +563,44 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
   return j && j.features && j.features[0];
 }
 
+// Doppelt gelaufene Abschnitte finden: Route alle 20 m abtasten und prüfen, ob dieselbe Stelle
+// an einer anderen (entlang der Route > 120 m entfernten) Position nochmal vorkommt.
+function overlap(coords){
+  const STEP = 20, NEAR = 18, GAP = 120;
+  const pts = [];                       // [lat, lng, dist]
+  let d = 0, next = 0;
+  for (let i = 1; i < coords.length; i++){
+    const a = coords[i-1], b = coords[i], seg = haversine(a, b);
+    while (next <= d + seg && seg > 0){
+      const t = (next - d) / seg;
+      pts.push([a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, next]);
+      next += STEP;
+    }
+    d += seg;
+  }
+  const total = d;
+  if (pts.length < 10) return { share: 0, segments: [], ranges: [] };
+  const cell = 0.0003, grid = new Map(), key = (la, lo) => Math.floor(la / cell) + ":" + Math.floor(lo / cell);
+  pts.forEach((p, i) => { const k = key(p[0], p[1]); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); });
+  const flag = new Array(pts.length).fill(false);
+  pts.forEach((p, i) => {
+    const cy = Math.floor(p[0] / cell), cx = Math.floor(p[1] / cell);
+    for (let dy = -1; dy <= 1 && !flag[i]; dy++) for (let dx = -1; dx <= 1 && !flag[i]; dx++){
+      const list = grid.get((cy+dy) + ":" + (cx+dx)); if (!list) continue;
+      for (const j of list){
+        const along = Math.abs(p[2] - pts[j][2]), loopGap = Math.min(along, total - along);
+        if (loopGap > GAP && haversine(p, pts[j]) < NEAR){ flag[i] = true; break; }
+      }
+    }
+  });
+  // einzelne Treffer (Kreuzungen) ignorieren – erst ab 3 aufeinanderfolgenden Punkten (≈ 60 m) zählt es
+  const segments = [], ranges = []; let run = [];
+  const flush = () => { if (run.length >= 3){ segments.push(run.map(p => [p[0], p[1]])); ranges.push([run[0][2] - 10, run[run.length-1][2] + 10]); } run = []; };
+  pts.forEach((p, i) => { if (flag[i]) run.push(p); else flush(); }); flush();
+  const doubledPts = segments.reduce((n, s) => n + s.length, 0);
+  return { share: doubledPts / pts.length, segments, ranges };
+}
+
 function analyse(feature){
   const p = feature.properties;
   const total = p.summary.distance;
@@ -571,13 +614,14 @@ function analyse(feature){
   const steps = [];
   (p.segments || []).forEach(seg => (seg.steps || []).forEach(st => steps.push({
     type: st.type, text: st.instruction || "", name: st.name && st.name !== "-" ? st.name : "", wp: st.way_points ? st.way_points[0] : 0 })));
-  // Punkte: Wald-/Feldwege hoch, Hauptstraßen und Radwege abwerten
+  const ov = overlap(coords);
+  // Punkte: Wald-/Feldwege hoch, Hauptstraßen und Radwege abwerten, doppelt gelaufene Strecke stark abwerten
   const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 20
-              - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15;
+              - pct("main") * 120 - pct("cycle") * 45 - pct("street") * 15 - ov.share * 90;
   return {
     distKm: total / 1000, score,
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
-    unpaved: total ? unpaved / total : 0,
+    unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges,
     ascent: Math.round(p.ascent || 0), coords, steps
   };
 }
@@ -625,7 +669,7 @@ async function search(){
         tries++; requests++;
         status(`${ph.label} … ${found.length} passende Runde${found.length === 1 ? "" : "n"} (Versuch ${requests}/${MAX_REQUESTS})`);
         setProgress(requests / MAX_REQUESTS);
-        const points = [4, 3, 5, 4, 6][requests % 5];
+        const points = [5, 4, 6, 5, 7, 4][requests % 6];   // mehr Punkte = rundere Runde, weniger Hin-und-zurück
         const seed = Math.floor(Math.random() * 10000);
         const jitter = 0.92 + Math.random() * 0.16;
         let f;
@@ -666,7 +710,7 @@ async function search(){
       near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
       results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
       status(`Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
-    } else status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil.`);
+    } else status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.`);
   } finally { searching = false; $("go").disabled = false; setProgress(0); }
 }
 $("go").onclick = search;
@@ -705,6 +749,7 @@ function render(){
         <span><i style="background:var(--c-cycle)"></i>Radweg ${pc(r.cycle)} %</span>
         <span><i style="background:var(--c-main)"></i>Hauptstraße ${pc(r.main)} %</span>
         <span>unbefestigt ${pc(r.unpaved)} %</span>
+        <span>↔ ${pc(r.overlap)} % doppelt</span>
       </div>
       ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
       ${r.relaxed && !r.outside ? '<div class="hint">Mit dieser Länge ging es nur über mehr Straßenabschnitte.</div>' : ""}
@@ -730,15 +775,52 @@ function select(i){
   highlight();
   const el = document.querySelectorAll(".card")[i]; if (el) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
+let decor = null;
 function highlight(){
   routeLayers.forEach((l, j) => {
     l.setStyle(j === selected ? { weight: 7, opacity: 0.95 } : { weight: 4, opacity: 0.35 });
     if (j === selected) l.bringToFront();
   });
+  drawDecor(results[selected], PALETTE[selected % PALETTE.length]);
   if (routeLayers[selected]) map.fitBounds(routeLayers[selected].getBounds(), { padding: [30, 30] });
 }
+// Richtungspfeile alle 250 m, Kilometer-Nummern und doppelt gelaufene Abschnitte auf der gewählten Route
+function pointAt(coords, cum, dist){
+  let i = 1; while (i < cum.length - 1 && cum[i] < dist) i++;
+  const a = coords[i-1], b = coords[i], seg = cum[i] - cum[i-1] || 1, t = Math.max(0, Math.min(1, (dist - cum[i-1]) / seg));
+  const kx = Math.cos(a[0] * Math.PI / 180);
+  const angle = Math.atan2((b[1]-a[1]) * kx, b[0]-a[0]) * 180 / Math.PI;   // Grad im Uhrzeigersinn ab Norden
+  return { ll: [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t], angle };
+}
+function drawDecor(r, color){
+  if (decor){ map.removeLayer(decor); decor = null; }
+  if (!r) return;
+  decor = L.layerGroup().addTo(map);
+  const cum = r.cum || (r.cum = cumulative(r.coords)), total = cum[cum.length - 1];
+  // doppelt gelaufene Abschnitte: weiß gestrichelt über der Route
+  (r.doubled || []).forEach(seg => L.polyline(seg, { color: "#fff", weight: 2.5, opacity: 0.95, dashArray: "4 7", interactive: false }).addTo(decor));
+  // Richtungspfeile
+  // Auf doppelt gelaufenen Stücken Pfeile/Nummern rechts neben die Linie setzen, damit Hin- und Rückweg getrennt sichtbar sind
+  const isDoubled = d => (r.doubledRanges || []).some(x => d >= x[0] && d <= x[1]);
+  const arrowSvg = (a, shift) => `<svg width="14" height="14" viewBox="0 0 14 14" style="transform:rotate(${a}deg)${shift ? " translateX(9px)" : ""}"><path d="M7 1.5 L12 11 L7 8.4 L2 11 Z" fill="#fff" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
+  for (let dist = 125; dist < total - 60; dist += 250){
+    if (Math.abs(dist % 1000) < 90 || Math.abs(dist % 1000 - 1000) < 90) continue;   // nicht auf Kilometer-Marken
+    const p = pointAt(r.coords, cum, dist);
+    L.marker(p.ll, { icon: L.divIcon({ className: "", html: `<div class="dir-arrow">${arrowSvg(p.angle, isDoubled(dist))}</div>`, iconSize: [16,16], iconAnchor: [8,8] }),
+      interactive: false, keyboard: false }).addTo(decor);
+  }
+  // Kilometer-Nummern + Startmarke
+  const kmIcon = (txt, off) => L.divIcon({ className: "", html: `<div class="km-mark" style="--rc:${color};${off ? `transform:translate(${off[0]}px,${off[1]}px)` : ""}">${txt}</div>`, iconSize: [22,22], iconAnchor: [11,11] });
+  for (let k = 1; k * 1000 < total - 150; k++){
+    const p = pointAt(r.coords, cum, k * 1000), rad = p.angle * Math.PI / 180;
+    const off = isDoubled(k * 1000) ? [Math.cos(rad) * 15, Math.sin(rad) * 15] : null;   // 15 px rechts der Laufrichtung
+    L.marker(p.ll, { icon: kmIcon(k, off), interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(decor);
+  }
+}
+
 function clearRoutes(){
   routeLayers.forEach(l => map.removeLayer(l)); routeLayers = []; results = []; selected = -1;
+  if (decor){ map.removeLayer(decor); decor = null; }
   $("results").innerHTML = "";
 }
 
@@ -761,7 +843,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { setStart, analyse, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { setStart, analyse, overlap, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
