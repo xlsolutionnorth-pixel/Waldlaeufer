@@ -168,6 +168,20 @@ body.navigating .topbar,body.navigating #suggest{display:none}
   </div>
 </div>
 
+<div class="modal" id="battModal">
+  <div class="box">
+    <h2>Navigation im Hintergrund</h2>
+    <p>Damit die Ansagen auch bei <b>gesperrtem Bildschirm</b> oder mit einer Musik-App im Vordergrund weiterlaufen,
+      sollte Waldläufer von der <b>Akku-Optimierung ausgenommen</b> sein. Sonst kann Android die Navigation nach ein paar Minuten beenden.<br><br>
+      Tippe auf „Erlauben" und bestätige im nächsten Fenster.</p>
+    <div class="btns">
+      <button id="battLater">Später</button>
+      <button class="primary" id="battOk">Erlauben</button>
+    </div>
+    <p style="text-align:center;margin:12px 0 0"><a href="#" id="battNever" style="font-size:13px">Nicht mehr fragen</a></p>
+  </div>
+</div>
+
 <div class="modal" id="keyModal">
   <div class="box">
     <h2>API-Schlüssel für die Routensuche</h2>
@@ -318,8 +332,21 @@ const ANNOUNCE_FAR = 120, ANNOUNCE_NOW = 25, OFF_ROUTE_M = 45;
 const nav = { active:false, route:null, cum:null, idx:0, watch:null, spoken:{}, km:0, offSince:0, offSaid:false, muted:false, wake:null, lastFix:0 };
 try { nav.muted = store.get("muted", "0") === "1"; } catch(e){}
 
+// Zugriff auf native Plugins (nur in der Android-App vorhanden)
+function plug(name){
+  const C = window.Capacitor;
+  if (!C || !(C.isNativePlatform && C.isNativePlatform())) return null;
+  if (C.isPluginAvailable && !C.isPluginAvailable(name)) return null;
+  return (C.Plugins && C.Plugins[name]) || (C.registerPlugin ? C.registerPlugin(name) : null);
+}
 function speak(text){
   if (nav.muted || !text) return;
+  // 1. eigenes Modul: Musik/Hörbuch wird während der Ansage leiser gestellt
+  const W = plug("WaldNative");
+  if (W){ W.speak({ text }).catch(() => fallbackSpeak(text)); return; }
+  fallbackSpeak(text);
+}
+function fallbackSpeak(text){
   const T = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech;
   if (T){ T.speak({ text, lang:"de-DE", rate:1.0, queueStrategy:1 }).catch(() => {}); return; }
   try { const u = new SpeechSynthesisUtterance(text); u.lang = "de-DE"; speechSynthesis.speak(u); } catch(e){}
@@ -397,9 +424,30 @@ async function startNav(r){
     if (c.accuracy && c.accuracy > 60) { $("navInfo").textContent = `GPS ungenau (±${Math.round(c.accuracy)} m)`; return; }
     updateNav([c.latitude, c.longitude]);
   };
-  const P = geoPlugin();
+  const P = geoPlugin(), BG = plug("BackgroundGeolocation"), W = plug("WaldNative");
+  nav.bg = false;
   try {
-    if (P){
+    if (BG){
+      // Hintergrund-GPS: läuft weiter bei gesperrtem Bildschirm oder wenn die Musik-App vorne ist.
+      // Android zeigt dazu eine dauerhafte Benachrichtigung.
+      if (W) { try { await W.requestNotificationPermission(); } catch(e){} }
+      nav.watch = await BG.addWatcher({
+        backgroundTitle: "Waldläufer navigiert",
+        backgroundMessage: `Runde ${fmt(r.distKm)} km – Ansagen auch bei gesperrtem Bildschirm.`,
+        requestPermissions: true, stale: false, distanceFilter: 3
+      }, (loc, err) => {
+        if (err){
+          if (err.code === "NOT_AUTHORIZED"){
+            $("navText").textContent = "Standort-Berechtigung fehlt – bitte in den Einstellungen erlauben.";
+            try { BG.openSettings(); } catch(e){}
+          }
+          return;
+        }
+        onPos(loc);
+      });
+      nav.bg = true;
+      checkBattery();
+    } else if (P){
       try { await P.requestPermissions(); } catch(e){}
       nav.watch = await P.watchPosition({ enableHighAccuracy:true, timeout:20000, maximumAge:0 }, (p) => p && onPos(p.coords));
     } else if (navigator.geolocation){
@@ -469,10 +517,15 @@ function updateNav(p){
 }
 
 function stopNav(silent){
-  const P = geoPlugin();
+  const P = geoPlugin(), BG = plug("BackgroundGeolocation");
   if (nav.watch !== null && nav.watch !== undefined){
-    try { if (P) P.clearWatch({ id: nav.watch }); else navigator.geolocation.clearWatch(nav.watch); } catch(e){}
+    try {
+      if (nav.bg && BG) BG.removeWatcher({ id: nav.watch });
+      else if (P) P.clearWatch({ id: nav.watch });
+      else navigator.geolocation.clearWatch(nav.watch);
+    } catch(e){}
   }
+  nav.bg = false;
   nav.watch = null; nav.active = false;
   try { nav.wake && nav.wake.release(); } catch(e){} nav.wake = null;
   document.body.classList.remove("navigating");
@@ -480,10 +533,28 @@ function stopNav(silent){
   setSheet(0);
   if (!silent) speak("Navigation beendet.");
 }
+// Akku-Optimierung: Viele Handys beenden Apps im Hintergrund trotz Benachrichtigung.
+// Einmal (und danach höchstens noch zweimal) freundlich darauf hinweisen.
+async function checkBattery(){
+  const W = plug("WaldNative"); if (!W) return;
+  try {
+    const r = await W.isIgnoringBatteryOptimizations();
+    if (r && r.value) return;
+    const asked = Number(store.get("battAsked", "0"));
+    if (asked >= 3) return;
+    store.set("battAsked", String(asked + 1));
+    $("battModal").style.display = "flex";
+  } catch(e){}
+}
+$("battOk").onclick = async () => { $("battModal").style.display = "none"; const W = plug("WaldNative"); if (W) try { await W.requestIgnoreBatteryOptimizations(); } catch(e){} };
+$("battLater").onclick = () => { $("battModal").style.display = "none"; };
+$("battNever").onclick = (e) => { e.preventDefault(); store.set("battAsked", "99"); $("battModal").style.display = "none"; };
+
 $("navEnd").onclick = () => stopNav();
 $("navMute").onclick = () => { nav.muted = !nav.muted; store.set("muted", nav.muted ? "1" : "0"); $("navMute").textContent = nav.muted ? "🔇" : "🔊"; };
 // Bildschirm-Sperre geht beim Zurückkehren in die App verloren → neu anfordern
 document.addEventListener("visibilitychange", async () => {
+  if (nav.active && document.visibilityState === "visible") setTimeout(() => map.invalidateSize(), 100);
   if (nav.active && document.visibilityState === "visible" && navigator.wakeLock){ try { nav.wake = await navigator.wakeLock.request("screen"); } catch(e){} }
 });
 
@@ -1106,7 +1177,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
