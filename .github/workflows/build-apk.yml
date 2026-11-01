@@ -34,11 +34,9 @@ jobs:
       - name: Android-Projekt erzeugen
         run: |
           npx cap add android
-          # Standort-Berechtigungen eintragen
-          M=android/app/src/main/AndroidManifest.xml
-          sed -i '/<\/manifest>/i\    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.VIBRATE" />\n    <uses-feature android:name="android.hardware.location.gps" android:required="false" />\n    <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>' $M
-          cat $M
-          grep -q ACCESS_FINE_LOCATION android/app/src/main/AndroidManifest.xml
+          # Berechtigungen, Benachrichtigungstexte und eigenes Modul (Musik leiser bei Ansagen) einbauen
+          python3 native/patch_android.py
+          cat android/app/src/main/AndroidManifest.xml
           npx cap sync android
 
       - name: APK kompilieren

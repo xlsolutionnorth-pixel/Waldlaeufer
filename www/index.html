@@ -32,6 +32,21 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
   border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.2);overflow:hidden;display:none}
 #suggest div{padding:12px 14px;border-bottom:1px solid var(--line);font-size:15px;cursor:pointer}
 #suggest div:last-child{border:0}
+#suggest div.info{color:var(--muted);cursor:default;font-size:14px}
+#suggest div small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+#favs{position:absolute;z-index:1001;top:calc(env(safe-area-inset-top) + 62px);left:10px;right:10px;background:var(--panel);
+  border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);overflow:hidden;display:none;max-height:60vh;overflow-y:auto}
+#favs .head{padding:11px 14px 8px;font-size:12px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
+#favs .item{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer}
+#favs .item .t{flex:1;min-width:0}
+#favs .item b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#favs .item small{color:var(--muted);font-size:12px}
+#favs .del{border:0;background:transparent;font-size:18px;color:var(--muted);padding:6px;cursor:pointer}
+#favs .add{display:flex;gap:8px;padding:12px 14px;background:color-mix(in srgb,var(--forest) 6%,transparent)}
+#favs .add input{flex:1;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:15px;background:var(--bg);color:var(--ink)}
+#favs .add button{border:0;border-radius:10px;padding:10px 14px;background:var(--forest);color:#fff;font-size:15px}
+#favs .add button:disabled{opacity:.5}
+#favs .empty{padding:14px;color:var(--muted);font-size:14px}
 .sheet{position:absolute;z-index:1000;left:0;right:0;bottom:0;height:var(--sheet-h,46vh);background:var(--panel);
   border-radius:20px 20px 0 0;box-shadow:var(--shadow);display:flex;flex-direction:column;transition:height .25s;
   padding-bottom:env(safe-area-inset-bottom)}
@@ -136,13 +151,15 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 </div>
 
 <div class="topbar">
-  <div class="search">
+  <form class="search" id="qform" autocomplete="off" onsubmit="return false">
     <input id="q" type="search" placeholder="Ort, Adresse oder Koordinaten" autocomplete="off" enterkeyhint="search">
-    <button class="iconbtn" id="locBtn" title="Mein Standort">📍</button>
-  </div>
+    <button type="button" class="iconbtn" id="locBtn" title="Mein Standort">📍</button>
+  </form>
+  <button class="iconbtn" id="favBtn" title="Meine Standorte">⭐</button>
   <button class="iconbtn" id="setBtn" title="Einstellungen">⚙️</button>
 </div>
 <div id="suggest"></div>
+<div id="favs"></div>
 
 <div class="sheet" id="sheet">
   <div class="grip" id="grip"><span></span></div>
@@ -198,6 +215,12 @@ body.navigating .topbar,body.navigating #suggest{display:none}
     <p>Die App berechnet Routen über den kostenlosen Dienst <b>openrouteservice</b> (OpenStreetMap-Daten, kennt Wald- und Feldwege). Erstelle dort ein kostenloses Konto und kopiere deinen Schlüssel hier hinein:<br>
       <a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener">openrouteservice.org/dev</a></p>
     <input id="keyInput" placeholder="Schlüssel einfügen" autocomplete="off" spellcheck="false">
+    <div style="margin:14px 0 4px;font-size:14px;font-weight:600">Andere Apps (Musik, Hörbuch) während einer Ansage:</div>
+    <div style="display:flex;gap:8px">
+      <label style="flex:1;display:flex;gap:6px;align-items:center;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:9px"><input type="radio" name="duck" value="duck"> leiser stellen</label>
+      <label style="flex:1;display:flex;gap:6px;align-items:center;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:9px"><input type="radio" name="duck" value="pause"> kurz pausieren</label>
+    </div>
+    <button id="speakTest" style="margin-top:8px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🔊 Ansage testen</button>
     <button id="keyTest" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🔧 Verbindung testen</button>
     <pre id="keyTestOut" style="white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8px 0 0;max-height:30vh;overflow:auto"></pre>
     <div class="btns">
@@ -317,10 +340,8 @@ $("locBtn").onclick = async () => {
   try {
     const c = await getPosition();
     showMe(c.latitude, c.longitude);
-    map.setView([c.latitude, c.longitude], 15);
-    if (locked){ status(""); return lockedHint(); }
-    setStart(c.latitude, c.longitude, "Mein Standort");
     status("");
+    chooseStart(c.latitude, c.longitude, "Mein Standort");
   } catch(e){
     status("Standort nicht verfügbar – bitte GPS & Berechtigung prüfen oder Startpunkt auf der Karte tippen.");
   }
@@ -351,17 +372,20 @@ function plug(name){
   if (C.isPluginAvailable && !C.isPluginAvailable(name)) return null;
   return (C.Plugins && C.Plugins[name]) || (C.registerPlugin ? C.registerPlugin(name) : null);
 }
-function speak(text){
-  if (nav.muted || !text) return;
-  // 1. eigenes Modul: Musik/Hörbuch wird während der Ansage leiser gestellt
+// duckMode: "duck" = andere Apps leiser, "pause" = andere Apps kurz pausieren
+function speak(text, force){
+  if ((nav.muted && !force) || !text) return Promise.resolve({ engine: "aus" });
+  // 1. eigenes Modul: Musik/Hörbuch wird während der Ansage leiser gestellt bzw. pausiert
   const W = plug("WaldNative");
-  if (W){ W.speak({ text }).catch(() => fallbackSpeak(text)); return; }
-  fallbackSpeak(text);
+  if (W) return W.speak({ text, mode: store.get("duckMode", "duck") })
+    .then(r => Object.assign({ engine: "waldnative" }, r || {}))
+    .catch(() => { fallbackSpeak(text); return { engine: "fallback-nach-fehler" }; });
+  return Promise.resolve({ engine: fallbackSpeak(text) });
 }
 function fallbackSpeak(text){
   const T = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech;
-  if (T){ T.speak({ text, lang:"de-DE", rate:1.0, queueStrategy:1 }).catch(() => {}); return; }
-  try { const u = new SpeechSynthesisUtterance(text); u.lang = "de-DE"; speechSynthesis.speak(u); } catch(e){}
+  if (T){ T.speak({ text, lang:"de-DE", rate:1.0, queueStrategy:1 }).catch(() => {}); return "tts-plugin"; }
+  try { const u = new SpeechSynthesisUtterance(text); u.lang = "de-DE"; speechSynthesis.speak(u); return "browser"; } catch(e){ return "keine"; }
 }
 function vibrate(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
 
@@ -627,19 +651,26 @@ document.addEventListener("visibilitychange", async () => {
 });
 
 /* ---------- Suche (Ort / Koordinaten / Google-Maps-Link) ---------- */
-let sugTimer;
+// Tippen → Vorschläge (autocomplete), Enter/Suchen → genauere Volltextsuche (search).
+// Ältere Antworten werden verworfen, Fehler und "keine Treffer" werden angezeigt.
+let sugTimer, geoSeq = 0;
+function showSuggest(html){ const box = $("suggest"); box.innerHTML = html; box.style.display = html ? "block" : "none"; }
 $("q").addEventListener("input", () => {
   clearTimeout(sugTimer);
   const v = $("q").value.trim();
-  if (parseCoords(v) || v.length < 4){ $("suggest").style.display = "none"; return; }
-  sugTimer = setTimeout(() => geocode(v), 700);
+  if (parseCoords(v) || v.length < 3){ showSuggest(""); return; }
+  sugTimer = setTimeout(() => geocode(v, "autocomplete"), 500);
 });
-$("q").addEventListener("keydown", e => {
-  if (e.key !== "Enter") return;
-  const c = parseCoords($("q").value.trim());
-  if (c){ map.setView(c, 15); if (locked) lockedHint(); else setStart(c[0], c[1]); $("q").blur(); $("suggest").style.display = "none"; }
-  else geocode($("q").value.trim());
-});
+function submitSearch(){
+  clearTimeout(sugTimer);
+  const v = $("q").value.trim(); if (!v) return;
+  const c = parseCoords(v);
+  if (c){ $("q").blur(); showSuggest(""); chooseStart(c[0], c[1], ""); return; }
+  geocode(v, "search");
+}
+$("qform").addEventListener("submit", e => { e.preventDefault(); submitSearch(); });
+$("q").addEventListener("keydown", e => { if (e.key === "Enter" || e.keyCode === 13){ e.preventDefault(); submitSearch(); } });
+$("q").addEventListener("focus", () => closeFavs());
 
 function parseCoords(s){
   // "49.45, 11.07" oder Google-Maps-Link mit @49.45,11.07 bzw. q=49.45,11.07
@@ -649,28 +680,54 @@ function parseCoords(s){
   return (Math.abs(lat) <= 90 && Math.abs(lng) <= 180) ? [lat, lng] : null;
 }
 
-async function geocode(text){
-  const key = getKey(); if (!key || !text) return;
-  try {
-    const c = map.getCenter();
-    const r = await fetch(`${GEOCODE}/autocomplete?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=6&focus.point.lat=${c.lat}&focus.point.lon=${c.lng}`, { headers: { "Authorization": key } });
-    if (!r.ok) return;
-    const j = await r.json();
-    const box = $("suggest");
-    box.innerHTML = "";
-    (j.features || []).forEach(f => {
-      const d = document.createElement("div");
-      d.textContent = f.properties.label;
-      d.onclick = () => {
-        const [lng, lat] = f.geometry.coordinates;
-        map.setView([lat, lng], 15);
-        if (locked) lockedHint(); else setStart(lat, lng, f.properties.label);
-        box.style.display = "none"; $("q").value = f.properties.label; $("q").blur();
-      };
-      box.appendChild(d);
-    });
-    box.style.display = box.children.length ? "block" : "none";
-  } catch(e){}
+async function geocode(text, kind){
+  const key = getKey();
+  if (!text) return;
+  if (!key){ showSuggest('<div class="info">Für die Ortssuche wird der Schlüssel benötigt (⚙️).</div>'); return; }
+  const seq = ++geoSeq;
+  if (kind === "search") showSuggest('<div class="info">Suche …</div>');
+  // Suche um deinen Standort bzw. den Kartenausschnitt herum bevorzugen
+  const f = meMarker ? meMarker.getLatLng() : map.getCenter();
+  const url = `${GEOCODE}/${kind}?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=7&focus.point.lat=${f.lat}&focus.point.lon=${f.lng}`;
+  let r, j = null;
+  try { r = await fetch(url, { headers: { "Authorization": key, "Accept": "application/json" } }); }
+  catch(e){ if (seq === geoSeq) showSuggest('<div class="info">Ortssuche: keine Verbindung.</div>'); return; }
+  try { j = await r.json(); } catch(e){}
+  if (seq !== geoSeq) return;                       // inzwischen neuer Text eingegeben
+  if (!r.ok){
+    const msg = j && j.error ? (typeof j.error === "string" ? j.error : j.error.message || "") : "";
+    showSuggest(`<div class="info">Ortssuche fehlgeschlagen (${r.status}${msg ? ": " + escapeHtml(msg) : ""}).</div>`); return;
+  }
+  const feats = (j && j.features) || [];
+  if (!feats.length){ showSuggest(kind === "search" ? `<div class="info">Nichts gefunden für „${escapeHtml(text)}“. Tipp: Straße, Hausnummer und Ort angeben, z. B. „Hauptstraße 5, Lauf“.</div>` : ""); return; }
+  const box = $("suggest"); box.innerHTML = "";
+  feats.forEach(ft => {
+    const d = document.createElement("div");
+    const pr = ft.properties || {};
+    const main = pr.name || pr.label || "";
+    const sub = [pr.postalcode, pr.locality || pr.localadmin, pr.region].filter(Boolean).join(" ");
+    d.innerHTML = `${escapeHtml(main)}${sub && sub !== main ? `<small>${escapeHtml(sub)}</small>` : ""}`;
+    d.onclick = () => {
+      const [lng, lat] = ft.geometry.coordinates;
+      showSuggest(""); $("q").value = pr.label || main; $("q").blur();
+      chooseStart(lat, lng, pr.label || main);
+    };
+    box.appendChild(d);
+  });
+  box.style.display = "block";
+}
+
+// Bewusst gewählter Startpunkt (Adresse, 📍, Meine Standorte): startet eine neue Suche.
+// Die bisherigen Ergebnisse bleiben unter „🕘 Letzte Suchen“ erhalten.
+function chooseStart(lat, lng, label){
+  if (nav.active){ toast("Während der Navigation lässt sich der Startpunkt nicht ändern."); map.setView([lat, lng], 15); return; }
+  if (searching){ toast("Bitte warten, bis die laufende Suche fertig ist."); return; }
+  const hadResults = results.length > 0;
+  closeDropdown(); closeFavs();
+  setLocked(false);
+  setStart(lat, lng, label);
+  map.setView([lat, lng], 15);
+  status(hadResults ? "Neuer Startpunkt gewählt – die vorherigen Ergebnisse findest du unter „🕘 Letzte Suchen“." : "");
 }
 
 /* ---------- Distanz ---------- */
@@ -692,6 +749,25 @@ function askKey(){
   });
 }
 $("setBtn").onclick = askKey;
+document.querySelectorAll('input[name=duck]').forEach(el => {
+  el.checked = el.value === store.get("duckMode", "duck");
+  el.onchange = () => { if (el.checked) store.set("duckMode", el.value); };
+});
+$("speakTest").onclick = async () => {
+  const out = $("keyTestOut");
+  out.textContent = "Spiele Testansage … (am besten vorher Musik starten)";
+  const r = await speak("Das ist eine Testansage von Waldläufer. In 200 Metern rechts abbiegen.", true);
+  const mode = store.get("duckMode", "duck") === "pause" ? "pausieren" : "leiser stellen";
+  if (r.engine === "waldnative"){
+    out.textContent = `✅ Sprachausgabe über das Waldläufer-Modul (Modus: ${mode}).\n` +
+      (r.focus ? "Android hat den Audiofokus erteilt – andere Apps sollten jetzt " + (mode === "pausieren" ? "kurz pausieren." : "leiser werden.") +
+                 (mode === "leiser stellen" ? "\nWird die Musik kaum leiser? Dann „kurz pausieren“ wählen – manche Apps senken nur wenig ab." : "")
+               : "⚠ Android hat den Audiofokus verweigert (z. B. während eines Anrufs).");
+  } else {
+    out.textContent = `⚠ Sprachausgabe über „${r.engine}“ – das Waldläufer-Modul fehlt in dieser App.\n` +
+      "Deshalb werden andere Apps nicht leiser. Prüfe auf GitHub: Gibt es den Ordner „native“ mit 3 Dateien und ist die neue build-apk.yml hochgeladen? Danach die APK neu bauen.";
+  }
+};
 
 // Diagnose: prüft Schlüssel, Rundkurs ohne und mit Wald-Gewichtung
 $("keyTest").onclick = async () => {
@@ -1030,6 +1106,9 @@ function analyse(feature){
   (ex.surface && ex.surface.summary || []).forEach(s => { if (UNPAVED.has(s.value)) unpaved += s.distance; });
   const pct = k => total ? share[k] / total : 0;
   const coords = feature.geometry.coordinates.map(c => [c[1], c[0]]);
+  // Höhe je Punkt (falls geliefert) – für die Steigungsanzeige
+  let ele = feature.geometry.coordinates.map(c => c.length > 2 && c[2] !== null ? Math.round(c[2]) : null);
+  if (ele.every(v => v === null)) ele = null;
   const steps = [];
   (p.segments || []).forEach(seg => (seg.steps || []).forEach(st => steps.push({
     type: st.type, text: st.instruction || "", name: st.name && st.name !== "-" ? st.name : "", wp: st.way_points ? st.way_points[0] : 0 })));
@@ -1057,7 +1136,7 @@ function analyse(feature){
     nature: pct("nature"), street: pct("street") + pct("unknown"), cycle: pct("cycle"), main: pct("main"),
     unpaved: total ? unpaved / total : 0, overlap: ov.share, doubled: ov.segments, doubledRanges: ov.ranges, crossPts: cross, crossCount: cross.length, round, cum,
     clean: cross.length === 0 && ov.share < 0.05, spursRemoved: pruned.removed, spurM: pruned.removedM, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
-    ascent: Math.round(p.ascent || 0), descent: Math.round(p.descent || 0), green, clockwise: area2 < 0, reversed: false, coords, steps
+    ascent: Math.round(p.ascent || 0), descent: Math.round(p.descent || 0), green, clockwise: area2 < 0, reversed: false, coords, steps, ele
   };
 }
 
@@ -1087,7 +1166,7 @@ function reverseRoute(r){
   }
   steps.push({ type: 10, text: "", name: "", wp: n - 1 });
   return Object.assign({}, r, {
-    coords: C, cum, steps,
+    coords: C, cum, steps, ele: r.ele ? r.ele.slice().reverse() : null, _steep: null,
     ascent: r.descent || r.ascent, descent: r.ascent,
     doubled: (r.doubled || []).map(seg => seg.slice().reverse()),
     doubledRanges: (r.doubledRanges || []).map(x => [total - x[1], total - x[0]]),
@@ -1202,7 +1281,8 @@ async function search(){
 $("go").onclick = search;
 
 /* ---------- Darstellung ---------- */
-const PALETTE = ["#2f8a4a", "#d9832b", "#7a4fc4", "#c43b6e", "#1f8fa3", "#8a6d1f"];
+// Routenfarben ohne Gelb/Orange/Rot – die sind für Steigungen reserviert
+const PALETTE = ["#2f8a4a", "#2a6fdb", "#7a4fc4", "#1f8fa3", "#3d5a80", "#5c4d7d"];
 
 let sortMode = store.get("sort", "best");
 function sortResults(){
@@ -1257,6 +1337,7 @@ function render(){
         <span>↔ ${pc(r.overlap)} % doppelt</span>
         <span>✕ ${r.crossCount} Kreuzung${r.crossCount === 1 ? "" : "en"}</span>
         ${typeof r.green === "number" ? `<span>🌳 Grün ${fmt(r.green)}/10</span>` : ""}
+        ${r.ele ? (() => { const st = steepness(r); return `<span><i style="background:#f2c200"></i>mäßig steil ${fmtDist(st.midM)}</span><span><i style="background:#e0302b"></i>steil ${fmtDist(st.highM)}</span>`; })() : ""}
         <span>${r.clockwise ? "↻ im Uhrzeigersinn" : "↺ gegen den Uhrzeigersinn"}</span>
       </div>
       ${r.outside ? `<div class="hint">⚠ ${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km neben deiner Wunschdistanz.</div>` : ""}
@@ -1310,6 +1391,35 @@ function pointAt(coords, cum, dist){
   const angle = Math.atan2((b[1]-a[1]) * kx, b[0]-a[0]) * 180 / Math.PI;   // Grad im Uhrzeigersinn ab Norden
   return { ll: [a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t], angle };
 }
+// Steigung abschnittsweise über je ~50 m: ab 5 % "mäßig" (gelb), ab 10 % "steil" (rot) – bergauf wie bergab.
+const GRADE_MID = 0.05, GRADE_HIGH = 0.10;
+function steepness(r){
+  if (r._steep) return r._steep;
+  const res = { mid: [], high: [], midM: 0, highM: 0 };
+  if (!r.ele || r.ele.length !== r.coords.length){ r._steep = res; return res; }
+  const C = r.coords, E = r.ele, cum = r.cum || (r.cum = cumulative(C)), n = C.length;
+  const cls = new Array(n).fill(0);
+  for (let i = 0, j = 0; i < n - 1; i++){
+    if (j < i + 1) j = i + 1;
+    while (j < n - 1 && cum[j] - cum[i] < 50) j++;
+    const d = cum[j] - cum[i];
+    if (d < 25) continue;
+    const g = Math.abs((E[j] - E[i]) / d);
+    const c = g >= GRADE_HIGH ? 2 : g >= GRADE_MID ? 1 : 0;
+    for (let k = i; k < j; k++) cls[k] = Math.max(cls[k], c);
+  }
+  // zusammenhängende Stücke bilden (kürzer als 30 m werden ignoriert)
+  let k = 0;
+  while (k < n - 1){
+    const c = cls[k]; let e = k;
+    while (e < n - 1 && cls[e] === c) e++;
+    const len = cum[e] - cum[k];
+    if (c && len >= 30){ (c === 2 ? res.high : res.mid).push(C.slice(k, e + 1)); if (c === 2) res.highM += len; else res.midM += len; }
+    k = e;
+  }
+  r._steep = res; return res;
+}
+
 function drawDecor(r, color){
   if (decor){ map.removeLayer(decor); decor = null; }
   if (!r) return;
@@ -1327,6 +1437,10 @@ function drawDecor(r, color){
     L.marker(p.ll, { icon: L.divIcon({ className: "", html: `<div class="dir-arrow">${arrowSvg(p.angle, isDoubled(dist))}</div>`, iconSize: [16,16], iconAnchor: [8,8] }),
       interactive: false, keyboard: false }).addTo(decor);
   }
+  // Steigungen: gelb = mäßig (5–10 %), rot = steil (über 10 %)
+  const st = steepness(r);
+  st.mid.forEach(seg => L.polyline(seg, { color: "#f2c200", weight: 7, opacity: 1, interactive: false, lineCap: "butt" }).addTo(decor));
+  st.high.forEach(seg => L.polyline(seg, { color: "#e0302b", weight: 7, opacity: 1, interactive: false, lineCap: "butt" }).addTo(decor));
   // Kreuzungspunkte als kleine Kreise
   (r.crossPts || []).forEach(ll => L.marker(ll, { icon: L.divIcon({ className: "", html: '<div style="width:12px;height:12px;border-radius:50%;border:2.5px solid #fff;background:#d1453b;box-shadow:0 0 2px rgba(0,0,0,.6)"></div>', iconSize: [12,12], iconAnchor: [6,6] }), interactive: false }).addTo(decor));
   // Kilometer-Nummern + Startmarke
@@ -1373,11 +1487,13 @@ function decodeCoords(arr){
 function unpackRoute(r){
   const o = Object.assign({}, r);
   if (o.c){ o.coords = decodeCoords(o.c); delete o.c; }
+  if (o.e){ let h = 0; o.ele = o.e.map(d => (h += d)); delete o.e; }
   return o;
 }
 function packRoute(r){
   const o = Object.assign({}, r);
-  delete o.cum; delete o.coords;
+  delete o.cum; delete o.coords; delete o._steep; delete o.ele;
+  if (r.ele){ let h = 0; o.e = r.ele.map(v => { const d = (v || 0) - h; h = v || 0; return d; }); }
   o.c = encodeCoords(r.coords);
   o.doubled = (r.doubled || []).map(seg => seg.map(c => [r5(c[0]), r5(c[1])]));
   return o;
@@ -1474,6 +1590,42 @@ $("newBtn").onclick = () => {
   status("Neuer Startpunkt: Karte antippen, 📍 nutzen oder oben einen Ort suchen. Den orangen Pin kannst du auch verschieben.");
 };
 
+/* ---------- Meine Standorte ---------- */
+const MAX_PLACES = 30;
+function placesList(){ return loadList("places"); }
+function closeFavs(){ $("favs").style.display = "none"; }
+function openFavs(){
+  showSuggest("");
+  const box = $("favs"), list = placesList();
+  const defName = start ? (startLabel && startLabel !== "Mein Standort" ? startLabel.split(",")[0] : "") : "";
+  box.innerHTML = `<div class="head">⭐ Meine Standorte (${list.length}/${MAX_PLACES})</div>` +
+    (list.length ? list.map((p, i) => `<div class="item" data-i="${i}"><span>📍</span><div class="t"><b>${escapeHtml(p.name)}</b>
+       <small>${p.label && p.label !== p.name ? escapeHtml(p.label) : p.lat.toFixed(5) + ", " + p.lng.toFixed(5)}</small></div>
+       <button class="del" data-del="${i}" aria-label="löschen">🗑</button></div>`).join("")
+      : '<div class="empty">Noch keine Standorte gespeichert.</div>') +
+    `<div class="add"><input id="favName" placeholder="${start ? "Name für aktuellen Startpunkt" : "Erst einen Startpunkt wählen"}" value="${escapeHtml(defName)}" ${start ? "" : "disabled"} maxlength="40">
+       <button id="favAdd" ${start ? "" : "disabled"}>Speichern</button></div>`;
+  box.style.display = "block";
+}
+$("favBtn").onclick = (e) => { e.stopPropagation(); if ($("favs").style.display === "block") closeFavs(); else openFavs(); };
+$("favs").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (e.target.id === "favAdd"){
+    const name = ($("favName").value || "").trim() || `Standort ${placesList().length + 1}`;
+    const list = placesList();
+    if (list.length >= MAX_PLACES){ toast(`Maximal ${MAX_PLACES} Standorte – lösche zuerst einen.`); return; }
+    if (list.some(p => Math.abs(p.lat - start.lat) < 1e-5 && Math.abs(p.lng - start.lng) < 1e-5)){ toast("Dieser Standort ist schon gespeichert."); return; }
+    list.unshift({ name, lat: start.lat, lng: start.lng, label: startLabel || "", t: Date.now() });
+    saveList("places", list); toast(`„${name}“ gespeichert.`); openFavs(); return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del){ const list = placesList(); list.splice(+del.dataset.del, 1); saveList("places", list); openFavs(); return; }
+  const it = e.target.closest(".item"); if (!it) return;
+  const p = placesList()[+it.dataset.i]; if (!p) return;
+  closeFavs(); chooseStart(p.lat, p.lng, p.name);
+});
+document.addEventListener("click", e => { if (!e.target.closest("#favs") && !e.target.closest("#favBtn")) closeFavs(); });
+
 /* ---------- Helfer ---------- */
 function openExternal(url){ if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) location.href = url; else window.open(url, "_blank", "noopener"); }
 document.querySelectorAll("a[target=_blank]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); openExternal(a.href); }));
@@ -1484,7 +1636,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();

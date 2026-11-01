@@ -51,6 +51,8 @@ public class WaldNativePlugin extends Plugin {
     private AudioAttributes speechAttrs;
     private AudioFocusRequest focusRequest;
     private boolean hasFocus = false;
+    private String focusMode = "duck";
+    private int lastFocusResult = -1;
     private int utteranceCounter = 0;
 
     private final AudioManager.OnAudioFocusChangeListener focusListener = change -> { };
@@ -77,21 +79,35 @@ public class WaldNativePlugin extends Plugin {
             });
             main.post(() -> {
                 ttsReady = true;
+                if (!pending.isEmpty()) requestFocus(focusMode);
                 for (String t : pending) speakNow(t);
                 pending.clear();
             });
         });
     }
 
-    /** Spricht einen Text und senkt dabei andere Audio-Apps ab. */
+    /**
+     * Spricht einen Text. mode = "duck": andere Apps werden leiser gestellt,
+     * mode = "pause": andere Apps pausieren kurz (funktioniert mit praktisch jeder Musik-/Hörbuch-App).
+     * Antwort: { focus: true/false (Audiofokus erhalten), ready: TTS bereit, mode }
+     */
     @PluginMethod
     public void speak(PluginCall call) {
         String text = call.getString("text", "");
+        String mode = call.getString("mode", "duck");
         if (text == null || text.isEmpty()) { call.resolve(); return; }
         main.post(() -> {
-            if (ttsReady) speakNow(text); else pending.add(text);
+            boolean newlyGranted = requestFocus(mode);
+            JSObject ret = new JSObject();
+            ret.put("focus", lastFocusResult == AudioManager.AUDIOFOCUS_REQUEST_GRANTED);
+            ret.put("ready", ttsReady);
+            ret.put("mode", focusMode);
+            if (!ttsReady) { pending.add(text); speaking.incrementAndGet(); finished(); }
+            // kurz warten, damit die andere App Zeit hat, leiser zu werden bzw. zu pausieren
+            else if (newlyGranted) main.postDelayed(() -> speakNow(text), "pause".equals(focusMode) ? 400 : 150);
+            else speakNow(text);
+            call.resolve(ret);
         });
-        call.resolve();
     }
 
     @PluginMethod
@@ -105,7 +121,7 @@ public class WaldNativePlugin extends Plugin {
     }
 
     private void speakNow(String text) {
-        requestFocus();
+        requestFocus(focusMode);
         speaking.incrementAndGet();
         String id = "wl-" + (++utteranceCounter);
         Bundle params = new Bundle();
@@ -117,27 +133,33 @@ public class WaldNativePlugin extends Plugin {
     private void finished() {
         // kurz warten, damit das Ende der Ansage nicht abgeschnitten wird
         main.postDelayed(() -> {
-            if (speaking.decrementAndGet() <= 0) {
+            if (speaking.decrementAndGet() <= 0 && (tts == null || !tts.isSpeaking())) {
                 speaking.set(0);
                 abandonFocus();
             }
         }, 350);
     }
 
+    /** Fordert den Audiofokus an. Gibt true zurück, wenn er neu erteilt wurde. */
     @SuppressWarnings("deprecation")
-    private void requestFocus() {
-        if (hasFocus || audioManager == null) return;
+    private boolean requestFocus(String mode) {
+        if (audioManager == null) return false;
+        String m = "pause".equals(mode) ? "pause" : "duck";
+        if (hasFocus && m.equals(focusMode)) return false;
+        if (hasFocus) abandonFocus();
+        focusMode = m;
+        int gain = "pause".equals(m) ? AudioManager.AUDIOFOCUS_GAIN_TRANSIENT : AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+            focusRequest = new AudioFocusRequest.Builder(gain)
                     .setAudioAttributes(speechAttrs)
                     .setOnAudioFocusChangeListener(focusListener)
                     .build();
-            audioManager.requestAudioFocus(focusRequest);
+            lastFocusResult = audioManager.requestAudioFocus(focusRequest);
         } else {
-            audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC,
-                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
+            lastFocusResult = audioManager.requestAudioFocus(focusListener, AudioManager.STREAM_MUSIC, gain);
         }
-        hasFocus = true;
+        hasFocus = lastFocusResult == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+        return hasFocus;
     }
 
     @SuppressWarnings("deprecation")
