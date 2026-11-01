@@ -1,6 +1,6 @@
 {
   "name": "waldlaeufer",
-  "version": "1.6.0",
+  "version": "2.0.0",
   "private": true,
   "description": "Jogging-Rundkurse bevorzugt durch Wald und über Feldwege",
   "dependencies": {
