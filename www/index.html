@@ -244,7 +244,11 @@ const WANT_RESULTS = 6;
 const REQ_GAP_MS = 2000;       // kostenloses Kontingent: max. 40 Anfragen/Minute
 
 // openrouteservice waytype-Codes
-const WT = {0:"unknown",1:"main",2:"main",3:"street",4:"nature",5:"nature",6:"cycle",7:"nature",8:"nature",9:"street",10:"street"};
+// Wegarten von openrouteservice: 0 unbekannt, 1 Bundes-/Landesstraße, 2 Kreis-/Verbindungsstraße, 3 Wohn-/Erschließungsstraße,
+// 4 Pfad, 5 Feld-/Waldweg (track), 6 Radweg (nur highway=cycleway), 7 Fußweg/Gehweg, 8 Treppe, 9 Fähre, 10 Baustelle
+const WT = {0:"unknown",1:"main",2:"main",3:"street",4:"nature",5:"nature",6:"cycle",7:"street",8:"street",9:"street",10:"street"};
+// Beläge, die als befestigt gelten (befestigt, Asphalt, Beton, Pflaster, Metall, Pflastersteine)
+const PAVED = new Set([1,3,4,5,6,14]);
 // Oberflächen-Codes, die unbefestigt sind
 const UNPAVED = new Set([2,8,9,10,11,12,15,16,17]);
 
@@ -1094,14 +1098,43 @@ function pruneSpurs(feature){
   return { feature: { type: "Feature", geometry: { type: "LineString", coordinates: C }, properties: props }, removed, removedM };
 }
 
+// Liefert die Meter je Kategorie aus den Wegstück-Listen (values) von Wegart und Belag – oder null, wenn keine da sind.
+function classifyWays(feature){
+  const ex = (feature.properties && feature.properties.extras) || {};
+  const wt = ex.waytype && ex.waytype.values, sf = ex.surface && ex.surface.values;
+  if (!wt || !wt.length) return null;
+  const C = feature.geometry.coordinates, n = C.length;
+  const cum = [0]; for (let k = 1; k < n; k++) cum.push(cum[k-1] + haversine([C[k-1][1], C[k-1][0]], [C[k][1], C[k][0]]));
+  const at = (list, i) => { if (!list) return null; for (const v of list) if (i >= v[0] && i < v[1]) return v[2]; return null; };
+  const out = { nature:0, street:0, cycle:0, main:0, unknown:0 };
+  for (let i = 0; i < n - 1; i++){
+    const w = at(wt, i), sfc = at(sf, i), d = cum[i+1] - cum[i];
+    let cat = WT[w] || "unknown";
+    const paved = sfc !== null && PAVED.has(sfc);
+    if ((w === 4 || w === 5) && paved) cat = "cycle";                      // asphaltierter Pfad/Wirtschaftsweg
+    else if (w === 7 && sfc !== null && UNPAVED.has(sfc)) cat = "nature";  // unbefestigter Fußpfad
+    out[cat] += d;
+  }
+  // auf die Gesamtlänge der Route skalieren
+  const sum = Object.values(out).reduce((a, b) => a + b, 0), total = (feature.properties.summary || {}).distance || sum;
+  if (sum > 0) Object.keys(out).forEach(k => out[k] *= total / sum);
+  return out;
+}
+
 function analyse(feature){
   const pruned = pruneSpurs(feature);
   feature = pruned.feature;
   const p = feature.properties;
   const total = p.summary.distance;
   const share = { nature:0, street:0, cycle:0, main:0, unknown:0 };
+  // Wegart und Belag je Wegstück kombinieren. Grund: openrouteservice meldet nur highway=cycleway als Radweg.
+  // Die meisten Radwege in Deutschland sind aber als Pfad (Geh-/Radweg) oder asphaltierter Wirtschaftsweg
+  // eingetragen – ein befestigter Pfad/Feldweg zählt daher als "Rad-/Asphaltweg", ein unbefestigter als Wald/Feldweg.
+  // Fuß-/Gehwege zählen nur unbefestigt als Naturweg, befestigt (Bürgersteig, Ortsweg) zur Kategorie Straße/Gehweg.
+  const classified = classifyWays(feature);
   const ex = p.extras || {};
-  (ex.waytype && ex.waytype.summary || []).forEach(s => { share[WT[s.value] || "unknown"] += s.distance; });
+  if (classified) Object.keys(classified).forEach(k => share[k] += classified[k]);
+  else (ex.waytype && ex.waytype.summary || []).forEach(s => { share[WT[s.value] || "unknown"] += s.distance; });
   let unpaved = 0;
   (ex.surface && ex.surface.summary || []).forEach(s => { if (UNPAVED.has(s.value)) unpaved += s.distance; });
   const pct = k => total ? share[k] / total : 0;
@@ -1330,8 +1363,8 @@ function render(){
       </div>
       <div class="legend">
         <span><i style="background:var(--c-nature)"></i>Wald/Feldweg ${pc(r.nature)} %</span>
-        <span><i style="background:var(--c-street)"></i>Nebenstraße ${pc(r.street)} %</span>
-        <span><i style="background:var(--c-cycle)"></i>Radweg ${pc(r.cycle)} %</span>
+        <span><i style="background:var(--c-street)"></i>Nebenstraße/Gehweg ${pc(r.street)} %</span>
+        <span><i style="background:var(--c-cycle)"></i>Rad-/Asphaltweg ${pc(r.cycle)} %</span>
         <span><i style="background:var(--c-main)"></i>Hauptstraße ${pc(r.main)} %</span>
         <span>unbefestigt ${pc(r.unpaved)} %</span>
         <span>↔ ${pc(r.overlap)} % doppelt</span>
