@@ -50,7 +50,10 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          # Gradle vom offiziellen Server laden (der GitHub-Release-Spiegel antwortete zeitweise mit 504)
+          sed -i -E 's#distributionUrl=.*/(gradle-[0-9.]+-(all|bin)\.zip)#distributionUrl=https\\://services.gradle.org/distributions/\1#' gradle/wrapper/gradle-wrapper.properties
+          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+          for i in 1 2 3; do ./gradlew assembleDebug --no-daemon && break; echo "Versuch $i fehlgeschlagen – neuer Versuch in 20 s"; sleep 20; [ $i = 3 ] && exit 1; done
 
       - name: APK umbenennen
         run: cp android/app/build/outputs/apk/debug/app-debug.apk Waldlaeufer.apk
