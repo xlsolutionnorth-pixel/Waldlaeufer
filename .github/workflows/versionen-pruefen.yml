@@ -1,0 +1,21 @@
+name: Versionen prüfen
+on:
+  push:
+    branches: [playstore]
+    paths: ['.github/workflows/versionen-pruefen.yml']
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: |
+          for p in @capacitor/core @capacitor/android @capacitor/cli @capacitor/geolocation @capacitor-community/admob @capacitor-community/background-geolocation @capacitor-community/text-to-speech; do
+            echo "== $p"; npm view $p dist-tags --json | tr -d '\n '; echo; npm view $p peerDependencies --json | tr -d '\n '; echo
+          done
+          echo "== admob versions"; npm view @capacitor-community/admob versions --json | tr -d '\n ' | tail -c 400; echo
+          echo "== admob@latest peer"; npm view @capacitor-community/admob@latest peerDependencies engines --json | tr -d '\n '; echo
+          echo "== bg-geo versions"; npm view @capacitor-community/background-geolocation versions --json | tr -d '\n ' | tail -c 200; echo
+          mkdir t && cd t && npm init -y >/dev/null && npm i -s @capacitor/cli@latest @capacitor/core@latest @capacitor/android@latest >/dev/null 2>&1
+          echo "== Capacitor android template variables.gradle"; tar -xzOf node_modules/@capacitor/cli/assets/android-template.tar.gz variables.gradle 2>/dev/null || find node_modules/@capacitor/cli/assets -name "*.tar.gz"
+          echo "== admob README excerpt"; npm pack @capacitor-community/admob@latest >/dev/null 2>&1 && tar -xzOf capacitor-community-admob-*.tgz package/README.md | sed -n '1,400p' | grep -nE "Capacitor|APPLICATION_ID|meta-data|requestConsentInfo|showConsentForm|AdmobConsentStatus|isTesting|showBanner|BannerAdPosition|BannerAdSize|prepareInterstitial|showInterstitial|initialize|tagForChildDirected|testingDevices|initializeForTesting" | head -80
