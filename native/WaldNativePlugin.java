@@ -186,18 +186,23 @@ public class WaldNativePlugin extends Plugin {
         call.resolve(ret);
     }
 
-    /** Öffnet den System-Dialog "Akku-Optimierung für Waldläufer ausschalten". */
+    /**
+     * Öffnet die Android-Einstellungen zur Akku-Optimierung (Liste aller Apps).
+     * Der direkte Dialog (ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS) ist im Play Store nur für
+     * wenige App-Arten erlaubt – deshalb hier die Einstellungsseite; dort wählt man Waldläufer aus.
+     * Fallback: App-Infoseite von Waldläufer (dort "Akku" → "Nicht eingeschränkt").
+     */
     @PluginMethod
     public void requestIgnoreBatteryOptimizations(PluginCall call) {
         Context ctx = getContext();
         try {
-            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                    Uri.parse("package:" + ctx.getPackageName()));
+            Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             ctx.startActivity(i);
         } catch (Exception e) {
             try {
-                Intent i = new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS);
+                Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + ctx.getPackageName()));
                 i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 ctx.startActivity(i);
             } catch (Exception ignored) { }

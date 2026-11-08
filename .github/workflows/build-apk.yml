@@ -36,6 +36,9 @@ jobs:
         run: npm install
 
       - name: Android-Projekt erzeugen
+        env:
+          # Eigene AdMob-App-ID: GitHub → Settings → Secrets and variables → Actions → Variables → ADMOB_APP_ID
+          ADMOB_APP_ID: ${{ vars.ADMOB_APP_ID }}
         run: |
           npx cap add android
           # Berechtigungen, Benachrichtigungstexte und eigenes Modul (Musik leiser bei Ansagen) einbauen
@@ -57,16 +60,22 @@ jobs:
           name: Waldlaeufer-APK
           path: Waldlaeufer.apk
 
-      # Nur für den Hauptzweig: APK als Release veröffentlichen.
+      # Hauptzweig: APK als Release ("latest") veröffentlichen.
       # Fester Download-Link: https://github.com/<konto>/<repo>/releases/latest/download/Waldlaeufer.apk
+      # Andere Zweige: als Vorabversion (Pre-release) – ändert den festen Link nicht.
       - name: APK als Release veröffentlichen
-        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          TAG="v${VERSION}-build${{ github.run_number }}"
-          gh release create "$TAG" Waldlaeufer.apk \
-            --title "Waldläufer ${VERSION} (Build ${{ github.run_number }})" \
-            --notes "Automatisch gebaut aus Commit ${GITHUB_SHA::7}." \
-            --latest
+          BRANCH="${GITHUB_REF_NAME//\//-}"
+          if [ "$BRANCH" = "main" ]; then
+            gh release create "v${VERSION}-build${{ github.run_number }}" Waldlaeufer.apk \
+              --title "Waldläufer ${VERSION} (Build ${{ github.run_number }})" \
+              --notes "Automatisch gebaut aus Commit ${GITHUB_SHA::7}." --latest
+          else
+            gh release create "test-${BRANCH}-build${{ github.run_number }}" Waldlaeufer.apk \
+              --title "Test ${BRANCH}: Waldläufer ${VERSION} (Build ${{ github.run_number }})" \
+              --notes "Testversion vom Zweig ${BRANCH}, Commit ${GITHUB_SHA::7}. Nicht für den Alltag." \
+              --prerelease --target "${GITHUB_SHA}"
+          fi

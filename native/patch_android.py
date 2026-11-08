@@ -17,7 +17,6 @@ perms = [
     "android.permission.FOREGROUND_SERVICE_LOCATION",
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.WAKE_LOCK",
-    "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
 ]
 add = []
 for p in perms:
@@ -31,9 +30,21 @@ m = m.replace("</manifest>", "\n".join(add) + "\n</manifest>")
 open(manifest_path, "w", encoding="utf-8").write(m)
 print("Manifest ergänzt:", len(add), "Einträge")
 
+# 1b. AdMob: App-ID als meta-data in <application>. Ohne eigene ID (GitHub-Variable ADMOB_APP_ID)
+#     wird Googles offizielle Test-App-ID verwendet – dann gibt es nur Test-Werbung.
+ADMOB_TEST_APP_ID = "ca-app-pub-3940256099942544~3347511713"
+admob_id = os.environ.get("ADMOB_APP_ID", "").strip() or ADMOB_TEST_APP_ID
+m = open(manifest_path, encoding="utf-8").read()
+if "com.google.android.gms.ads.APPLICATION_ID" not in m:
+    m = re.sub(r"(<application\b[^>]*>)", r'\1\n        <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="@string/admob_app_id" />', m, count=1)
+    open(manifest_path, "w", encoding="utf-8").write(m)
+print("AdMob-App-ID:", "eigene" if admob_id != ADMOB_TEST_APP_ID else "Google-Test-ID")
+
 # 2. Texte für die Hintergrund-Benachrichtigung
 strings_path = os.path.join(APP, "res", "values", "strings.xml")
 s = open(strings_path, encoding="utf-8").read()
+if "admob_app_id" not in s:
+    s = s.replace("</resources>", f'    <string name="admob_app_id">{admob_id}</string>\n</resources>')
 if "capacitor_background_geolocation_notification_channel_name" not in s:
     s = s.replace("</resources>",
         '    <string name="capacitor_background_geolocation_notification_channel_name">Navigation</string>\n'
