@@ -21,7 +21,7 @@
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
-#map{position:absolute;inset:0;bottom:var(--sheet-h,46vh);transition:bottom .25s}
+#map{position:absolute;inset:0;bottom:calc(var(--sheet-h,46vh) + var(--ad-h,0px));transition:bottom .25s}
 .topbar{position:absolute;z-index:1000;top:calc(env(safe-area-inset-top) + 10px);left:10px;right:10px;display:flex;gap:8px}
 .search{flex:1;display:flex;background:var(--panel);border-radius:14px;box-shadow:0 2px 10px rgba(0,0,0,.18);overflow:hidden}
 .search input{flex:1;border:0;background:transparent;color:var(--ink);padding:12px 14px;font-size:16px;outline:none;min-width:0}
@@ -47,7 +47,7 @@ html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
 #favs .add button{border:0;border-radius:10px;padding:10px 14px;background:var(--forest);color:#fff;font-size:15px}
 #favs .add button:disabled{opacity:.5}
 #favs .empty{padding:14px;color:var(--muted);font-size:14px}
-.sheet{position:absolute;z-index:1000;left:0;right:0;bottom:0;height:var(--sheet-h,46vh);background:var(--panel);
+.sheet{position:absolute;z-index:1000;left:0;right:0;bottom:var(--ad-h,0px);height:var(--sheet-h,46vh);background:var(--panel);
   border-radius:20px 20px 0 0;box-shadow:var(--shadow);display:flex;flex-direction:column;transition:height .25s;
   padding-bottom:env(safe-area-inset-bottom)}
 .grip{padding:8px 0 4px;display:grid;place-items:center;cursor:pointer}
@@ -120,7 +120,7 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 .dropdown .empty{padding:16px;color:var(--muted);font-size:14px;text-align:center}
 .dropdown .head{padding:9px 12px 7px;font-size:12px;font-weight:650;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--line)}
 .startinfo.locked{border-style:solid;background:color-mix(in srgb,var(--forest) 7%,transparent)}
-#toast{position:fixed;z-index:3000;left:50%;bottom:calc(var(--sheet-h,46vh) + 14px);transform:translateX(-50%);background:#1d2a22;color:#fff;
+#toast{position:fixed;z-index:3000;left:50%;bottom:calc(var(--sheet-h,46vh) + var(--ad-h,0px) + 14px);transform:translateX(-50%);background:#1d2a22;color:#fff;
   padding:10px 14px;border-radius:12px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:88vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
 #toast.show{opacity:1}
 .me-dot{width:16px;height:16px;border-radius:50%;background:#2a7de1;border:3px solid #fff;box-shadow:0 0 0 6px rgba(42,125,225,.25)}
@@ -222,6 +222,7 @@ body.navigating .topbar,body.navigating #suggest{display:none}
       <label style="flex:1;display:flex;gap:6px;align-items:center;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:9px"><input type="radio" name="duck" value="pause"> kurz pausieren</label>
     </div>
     <button id="speakTest" style="margin-top:8px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🔊 Ansage testen</button>
+    <button id="adPrivacy" style="display:none;margin-top:8px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🛡 Datenschutz-Einstellungen (Werbung)</button>
     <button id="keyTest" style="margin-top:10px;width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);font-size:15px">🔧 Verbindung testen</button>
     <pre id="keyTestOut" style="white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8px 0 0;max-height:30vh;overflow:auto"></pre>
     <div class="btns">
@@ -457,6 +458,7 @@ async function startNav(r){
   setArrow("⬆"); $("navDist").textContent = fmtDist(nav.cum[nav.cum.length - 1]);
   $("navText").textContent = "GPS wird gesucht …"; $("navInfo").textContent = "";
   setSheet(2);
+  adBanner(false);                   // während der Navigation keine Werbung
   map.setView(r.coords[0], 17);
   try { if (navigator.wakeLock) nav.wake = await navigator.wakeLock.request("screen"); } catch(e){}
   speak(`Navigation gestartet. Runde ${fmt(r.distKm)} Kilometer. Viel Spaß!`);
@@ -629,6 +631,7 @@ function stopNav(silent){
   $("nav").style.display = "none";
   setSheet(0);
   if (!silent) speak("Navigation beendet.");
+  adBanner(true);
 }
 // Akku-Optimierung: Viele Handys beenden Apps im Hintergrund trotz Benachrichtigung.
 // Einmal (und danach höchstens noch zweimal) freundlich darauf hinweisen.
@@ -1310,7 +1313,10 @@ async function search(){
       addHistory(target);
       status(stopped ? stopNote + " Bisher gefunden: die nächstgelegenen Runden." : `Keine Runde mit ${fmt(target)} km ±${TOL_KM} km gefunden – hier die nächstgelegenen. Tipp: anderen Startpunkt oder nochmal suchen.`);
     } else { addHistory(target); status(`${found.length} passende Runde${found.length > 1 ? "n" : ""} gefunden – sortiert nach Natur-Anteil und wenig Doppelung.` + (stopped ? " ⚠ Suche vorzeitig beendet: " + stopNote : "")); }
-  } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
+  } finally {
+    searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false);
+    if (results.length) adAfterSearch();
+  }
 }
 $("go").onclick = search;
 
@@ -1660,6 +1666,81 @@ $("favs").addEventListener("click", (e) => {
 });
 document.addEventListener("click", e => { if (!e.target.closest("#favs") && !e.target.closest("#favBtn")) closeFavs(); });
 
+/* ---------- Werbung (Google AdMob) ---------- */
+// testing: true → ausschließlich Google-Test-Werbung (keine Einnahmen, aber gefahrlos zum Ausprobieren).
+// Für echte Werbung: eigene Anzeigenblock-IDs aus dem AdMob-Konto eintragen, testing auf false setzen
+// und in GitHub die Variable ADMOB_APP_ID setzen (siehe PLAYSTORE.md).
+const ADS = {
+  enabled: true,
+  testing: true,
+  banner: "ca-app-pub-3940256099942544/9214589741",        // Google-Test-ID (adaptives Banner)
+  interstitial: "ca-app-pub-3940256099942544/1033173712",  // Google-Test-ID (Vollbild)
+  interstitialEvery: 3                                      // Vollbild nach jeder 3. erfolgreichen Suche
+};
+const ads = { ready: false, wantBanner: true, bannerOn: false, bannerH: 0, interReady: false, privacy: false, status: "" };
+
+function applyAdInset(){
+  document.documentElement.style.setProperty("--ad-h", (ads.bannerOn ? ads.bannerH : 0) + "px");
+  setTimeout(() => map.invalidateSize(), 300);
+}
+async function adBanner(on){
+  const A = plug("AdMob"); ads.wantBanner = on;
+  if (!A || !ads.ready) return;
+  try {
+    if (on && !ads.bannerOn){
+      await A.showBanner({ adId: ADS.banner, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 0, isTesting: ADS.testing });
+      ads.bannerOn = true;
+    } else if (!on && ads.bannerOn){
+      await A.removeBanner(); ads.bannerOn = false;
+    }
+  } catch(e){ ads.bannerOn = false; }
+  applyAdInset();
+}
+async function prepInterstitial(){
+  const A = plug("AdMob"); if (!A || !ads.ready || ads.interReady) return;
+  try { await A.prepareInterstitial({ adId: ADS.interstitial, isTesting: ADS.testing }); ads.interReady = true; } catch(e){ ads.interReady = false; }
+}
+async function adAfterSearch(){
+  const A = plug("AdMob"); if (!A || !ads.ready || nav.active) return;
+  const n = Number(store.get("adSearches", "0")) + 1; store.set("adSearches", String(n));
+  if (n % ADS.interstitialEvery !== 0 || !ads.interReady) return;
+  // kurz warten, damit man die gefundenen Runden zuerst sieht
+  setTimeout(async () => {
+    if (nav.active) return;
+    try { ads.interReady = false; await A.showInterstitial(); } catch(e){}
+    prepInterstitial();
+  }, 1200);
+}
+async function initAds(){
+  const A = plug("AdMob"); if (!ADS.enabled || !A) return;
+  // 1. Einwilligung (EU/UK/Schweiz): Googles zertifiziertes Einwilligungsfenster (TCF). Erscheint nur,
+  //    wenn im AdMob-Konto eine Datenschutzerklärung-Nachricht eingerichtet ist.
+  let canAsk = ADS.testing;
+  try {
+    let info = await A.requestConsentInfo({});
+    if (info.isConsentFormAvailable && info.status === "REQUIRED") info = await A.showConsentForm();
+    ads.status = info.status; ads.privacy = info.privacyOptionsRequirementStatus === "REQUIRED";
+    canAsk = canAsk || !!info.canRequestAds;
+  } catch(e){ ads.status = "Einwilligung: " + (e && e.message || e); }
+  if (!canAsk) return;
+  // 2. Werbe-SDK starten, Banner zeigen, Vollbild vorladen
+  try { await A.initialize({ initializeForTesting: ADS.testing }); } catch(e){ ads.status = "Start: " + (e && e.message || e); return; }
+  ads.ready = true;
+  try {
+    A.addListener("bannerAdSizeChanged", info => { ads.bannerH = Math.round((info && info.height) || 0); applyAdInset(); });
+    A.addListener("interstitialAdDismissed", () => { ads.interReady = false; prepInterstitial(); });
+  } catch(e){}
+  $("adPrivacy").style.display = "block";
+  if (ads.wantBanner && !nav.active) adBanner(true);
+  prepInterstitial();
+}
+$("adPrivacy").onclick = async () => {
+  const A = plug("AdMob"); if (!A) return;
+  try { await A.showPrivacyOptionsForm(); }
+  catch(e){ toast("Die Datenschutz-Einstellungen sind gerade nicht verfügbar."); }
+};
+setTimeout(initAds, 1500);
+
 /* ---------- Helfer ---------- */
 function openExternal(url){ if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) location.href = url; else window.open(url, "_blank", "noopener"); }
 document.querySelectorAll("a[target=_blank]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); openExternal(a.href); }));
@@ -1670,7 +1751,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { ads, ADS, adBanner, adAfterSearch, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
