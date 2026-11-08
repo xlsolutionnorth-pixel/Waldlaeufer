@@ -67,6 +67,22 @@ jobs:
           sed -i -E "s#^distributionUrl=.*#distributionUrl=${URL//:/\\\\:}#" $P
           grep -q '^distributionSha256Sum=' $P && sed -i "s#^distributionSha256Sum=.*#distributionSha256Sum=$SUM#" $P || echo "distributionSha256Sum=$SUM" >> $P
           echo "Gradle $V von: $URL"
+          # Bibliotheken zuerst von Googles offiziellem Maven-Central-Spiegel laden: Maven Central selbst leitet
+          # manche Dateien (z. B. den Kotlin-Compiler) zu GitHub-Releases weiter, die zeitweise mit 504 antworten.
+          mkdir -p ~/.gradle/init.d
+          cat > ~/.gradle/init.d/central-spiegel.gradle <<'GRADLE'
+          def SPIEGEL = 'https://maven-central.storage-download.googleapis.com/maven2/'
+          def vorne = { handler ->
+              def r = handler.maven { url SPIEGEL; name 'MavenCentralGoogleSpiegel' }
+              handler.remove(r); handler.addFirst(r)
+          }
+          allprojects { p ->
+              vorne(p.repositories)
+              vorne(p.buildscript.repositories)
+          }
+          settingsEvaluated { st -> vorne(st.pluginManagement.repositories) }
+          GRADLE
+          sed -i 's/^          //' ~/.gradle/init.d/central-spiegel.gradle
           cat $P
           for i in 1 2 3; do ./gradlew assembleDebug --no-daemon && break; echo "Versuch $i fehlgeschlagen – neuer Versuch in 20 s"; sleep 20; [ $i = 3 ] && exit 1; done
 
