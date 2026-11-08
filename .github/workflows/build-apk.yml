@@ -50,9 +50,24 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
-          # Schlanke Gradle-Variante (-bin) statt -all: der große Download brach wiederholt mit 504 ab
-          sed -i -E 's#distributionUrl=.*/gradle-([0-9.]+)-(all|bin)\.zip#distributionUrl=https\\://services.gradle.org/distributions/gradle-\1-bin.zip#' gradle/wrapper/gradle-wrapper.properties
-          grep distributionUrl gradle/wrapper/gradle-wrapper.properties
+          # Gradle-Download absichern: Der offizielle Server leitet zu GitHub-Releases weiter, die zeitweise
+          # mit 504 antworten. Dann wird ein Spiegel-Server genutzt – Gradle prüft die Datei dabei gegen
+          # die OFFIZIELLE Prüfsumme (distributionSha256Sum), eine veränderte Datei wird abgelehnt.
+          P=gradle/wrapper/gradle-wrapper.properties
+          V=$(sed -nE 's#^distributionUrl=.*gradle-([0-9.]+)-(all|bin)\.zip#\1#p' $P)
+          SUM=$(curl -sfL --retry 3 "https://services.gradle.org/distributions/gradle-$V-bin.zip.sha256")
+          [ ${#SUM} -eq 64 ] || { echo "Offizielle Prüfsumme nicht erhältlich"; exit 1; }
+          URL=""
+          for u in "https://services.gradle.org/distributions/gradle-$V-bin.zip" \
+                   "https://repo.huaweicloud.com/gradle/gradle-$V-bin.zip" \
+                   "https://mirrors.cloud.tencent.com/gradle/gradle-$V-bin.zip"; do
+            if curl -sfIL --max-time 30 "$u" >/dev/null; then URL="$u"; break; fi
+          done
+          [ -n "$URL" ] || { echo "Keine Gradle-Quelle erreichbar"; exit 1; }
+          sed -i -E "s#^distributionUrl=.*#distributionUrl=${URL//:/\\\\:}#" $P
+          grep -q '^distributionSha256Sum=' $P && sed -i "s#^distributionSha256Sum=.*#distributionSha256Sum=$SUM#" $P || echo "distributionSha256Sum=$SUM" >> $P
+          echo "Gradle $V von: $URL"
+          cat $P
           for i in 1 2 3; do ./gradlew assembleDebug --no-daemon && break; echo "Versuch $i fehlgeschlagen – neuer Versuch in 20 s"; sleep 20; [ $i = 3 ] && exit 1; done
 
       - name: APK umbenennen
