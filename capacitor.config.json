@@ -1,6 +1,6 @@
 {
-  "appId": "de.waldlaeufer.app",
-  "appName": "Waldläufer",
+  "appId": "de.waldlaeufer.test",
+  "appName": "Waldläufer Test",
   "webDir": "www",
   "android": {
     "useLegacyBridge": true

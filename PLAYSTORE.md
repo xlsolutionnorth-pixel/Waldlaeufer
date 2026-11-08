@@ -18,6 +18,7 @@ Rechtliche und steuerliche Punkte ersetzen keine Beratung durch Fachleute.
 | Werbung (AdMob) | eingebaut, **nur Google-Test-Werbung**: Einwilligungsfenster (UMP/TCF), Banner unten, Vollbild nach jeder 3. Suche, keine Werbung während der Navigation, Knopf „Datenschutz-Einstellungen (Werbung)“ unter ⚙️ |
 | AdMob-App-ID | wird beim Bauen aus der GitHub-Variable `ADMOB_APP_ID` gelesen; fehlt sie, wird Googles Test-ID verwendet |
 | Test-APKs | jeder Bau auf einem Testzweig erscheint als „Pre-release“ unter Releases (der feste Download-Link der Alltags-App bleibt unberührt) |
+| Eigene Test-Kennung | Der Zweig baut „Waldläufer Test“ (`de.waldlaeufer.test`) – läuft **neben** der Alltags-App. Vor der Veröffentlichung wieder auf `de.waldlaeufer.app` stellen. |
 
 ---
 
