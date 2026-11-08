@@ -11,10 +11,11 @@ jobs:
         with: { node-version: 22 }
       - run: |
           npm pack @capacitor-community/admob@8.3.0 >/dev/null 2>&1 && tar -xzf capacitor-community-admob-*.tgz
-          R=package/README.md
-          echo "== SETUP"; sed -n '60,135p' $R
-          echo "== API"; grep -nE "^### |=> Promise" $R | sed -n '1,120p'
-          echo "== INTERFACES"; awk '/#### BannerAdOptions/,/#### /' $R | head -30; awk '/#### AdOptions/,/#### /' $R | head -25; awk '/#### AdmobConsentRequestOptions/,/#### /' $R | head -20; awk '/#### AdMobInitializationOptions/,/#### /' $R | head -20
-          echo "== ENUMS"; awk '/#### BannerAdPluginEvents/,/#### /' $R | head -20; awk '/#### BannerAdPosition/,/#### /' $R | head -12; awk '/#### AdmobConsentStatus/,/#### /' $R | head -12
-          echo "== ANDROID MANIFEST in plugin"; cat package/android/src/main/AndroidManifest.xml
-          echo "== variables"; grep -rn "playServicesAdsVersion\|playServicesAds\|ump" package/android/build.gradle | head
+          cd package/dist/esm
+          grep -rhnE "(BOTTOM_CENTER|TOP_CENTER|ADAPTIVE_BANNER|BANNER =|REQUIRED|OBTAINED|NOT_REQUIRED|UNKNOWN|SizeChanged|FailedToLoad|Dismissed|DEBUG_GEOGRAPHY_EEA|EEA =)" --include=*.js . | head -30
+          echo "== BannerAdOptions"; grep -rh -A40 "interface BannerAdOptions" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -12
+          echo "== AdOptions"; grep -rh -A40 "interface AdOptions" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -10
+          echo "== ConsentRequest"; grep -rh -A30 "interface AdmobConsentRequestOptions" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -8
+          echo "== ConsentInfo"; grep -rh -A30 "interface AdmobConsentInfo" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -8
+          echo "== Init"; grep -rh -A40 "interface AdMobInitializationOptions" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -8
+          echo "== BannerSize"; grep -rh -A12 "interface AdMobBannerSize" --include=*.d.ts . | grep -E "^\s+[a-zA-Z]+\??:" | head -4
