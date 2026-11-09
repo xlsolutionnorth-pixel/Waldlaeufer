@@ -1,0 +1,23 @@
+# Waldläufer-Vermittlungs-Server – wird über .github/workflows/server-deploy.yml eingerichtet.
+# Adresse danach: https://waldlaeufer-api.<dein-workers-subdomain>.workers.dev
+name = "waldlaeufer-api"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# Begrenzungen (Zähler je Cloudflare-Standort, ungefähr):
+# Gerät: höchstens 30 Anfragen pro Minute – eine Suche braucht bis zu 20, Ortssuche einige wenige.
+[[ratelimits]]
+name = "RL_DEVICE"
+namespace_id = "41001"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+# Gesamt: knapp unter dem Minutenlimit von openrouteservice (40/Min.) – die App wartet dann kurz.
+[[ratelimits]]
+name = "RL_TOTAL"
+namespace_id = "41002"
+  [ratelimits.simple]
+  limit = 38
+  period = 60

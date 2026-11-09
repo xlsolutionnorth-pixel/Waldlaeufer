@@ -7,6 +7,7 @@
 <title>Waldläufer</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="config.js"></script>
 <style>
 :root{
   --bg:#f4f1ea; --panel:#fffdf8; --ink:#1d2a22; --muted:#66705f; --line:#e2ddd0;
@@ -212,8 +213,10 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 
 <div class="modal" id="keyModal">
   <div class="box">
-    <h2>API-Schlüssel für die Routensuche</h2>
-    <p>Die App berechnet Routen über den kostenlosen Dienst <b>openrouteservice</b> (OpenStreetMap-Daten, kennt Wald- und Feldwege). Erstelle dort ein kostenloses Konto und kopiere deinen Schlüssel hier hinein:<br>
+    <h2 id="keyTitle">API-Schlüssel für die Routensuche</h2>
+    <p id="serverInfo" style="display:none">✅ Die Routensuche läuft über den <b>Waldläufer-Server</b> – du brauchst <b>keinen</b> eigenen Schlüssel.
+      Nur wer möchte, kann unten einen eigenen openrouteservice-Schlüssel eintragen; der hat dann Vorrang.</p>
+    <p id="keyInfo">Die App berechnet Routen über den kostenlosen Dienst <b>openrouteservice</b> (OpenStreetMap-Daten, kennt Wald- und Feldwege). Erstelle dort ein kostenloses Konto und kopiere deinen Schlüssel hier hinein:<br>
       <a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener">openrouteservice.org/dev</a></p>
     <input id="keyInput" placeholder="Schlüssel einfügen" autocomplete="off" spellcheck="false">
     <div style="margin:14px 0 4px;font-size:14px;font-weight:600">Andere Apps (Musik, Hörbuch) während einer Ansage:</div>
@@ -240,6 +243,9 @@ body.navigating .topbar,body.navigating #suggest{display:none}
 // Seit 2026 neue Adressen (api.openrouteservice.org ist abgekündigt, Kontingent dort auf 10 % gekürzt, Abschaltung Nov. 2026)
 const ORS = "https://api.heigit.org/openrouteservice";
 const GEOCODE = "https://api.heigit.org/pelias/v1";
+// Waldläufer-Server (Vermittlung mit eigenem Schlüssel) – wenn eingerichtet, braucht niemand einen eigenen Schlüssel.
+// Ein selbst eingetragener Schlüssel (⚙️) hat Vorrang und fragt openrouteservice direkt an.
+const SERVER = String(((window.WALDLAEUFER_CONFIG || {}).serverUrl) || "").replace(/\/+$/, "");
 const TOL_KM = 2;              // erlaubte Abweichung (±2 km)
 const MAX_REQUESTS = 20;       // Obergrenze API-Aufrufe pro Suche (schont das Tageskontingent)
 const WANT_RESULTS = 6;
@@ -691,14 +697,15 @@ function parseCoords(s){
 async function geocode(text, kind){
   const key = getKey();
   if (!text) return;
-  if (!key){ showSuggest('<div class="info">Für die Ortssuche wird der Schlüssel benötigt (⚙️).</div>'); return; }
+  if (!key && !viaServer()){ showSuggest('<div class="info">Für die Ortssuche wird der Schlüssel benötigt (⚙️).</div>'); return; }
   const seq = ++geoSeq;
   if (kind === "search") showSuggest('<div class="info">Suche …</div>');
   // Suche um deinen Standort bzw. den Kartenausschnitt herum bevorzugen
   const f = meMarker ? meMarker.getLatLng() : map.getCenter();
-  const url = `${GEOCODE}/${kind}?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=7&focus.point.lat=${f.lat}&focus.point.lon=${f.lng}`;
+  const qs = `text=${encodeURIComponent(text)}&lang=de&size=7&focus.point.lat=${f.lat}&focus.point.lon=${f.lng}`;
+  const url = viaServer() ? `${SERVER}/geocode/${kind}?${qs}` : `${GEOCODE}/${kind}?api_key=${encodeURIComponent(key)}&${qs}`;
   let r, j = null;
-  try { r = await fetch(url, { headers: { "Authorization": key, "Accept": "application/json" } }); }
+  try { r = await fetch(url, { headers: viaServer() ? { "X-Install-Id": installId(), "Accept": "application/json" } : { "Authorization": key, "Accept": "application/json" } }); }
   catch(e){ if (seq === geoSeq) showSuggest('<div class="info">Ortssuche: keine Verbindung.</div>'); return; }
   try { j = await r.json(); } catch(e){}
   if (seq !== geoSeq) return;                       // inzwischen neuer Text eingegeben
@@ -747,6 +754,16 @@ $("km").onchange = () => store.set("km", km());
 
 /* ---------- API-Schlüssel ---------- */
 function getKey(){ return store.get("orsKey", "").trim(); }
+function viaServer(){ return !!SERVER && !getKey(); }
+// zufällige Geräte-ID für die Begrenzung auf dem Server (keine persönlichen Daten)
+function installId(){
+  let id = store.get("installId", "");
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(id)){
+    id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : "wl-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 12);
+    store.set("installId", id);
+  }
+  return id;
+}
 function askKey(){
   return new Promise(res => {
     $("keyInput").value = getKey();
@@ -757,6 +774,11 @@ function askKey(){
   });
 }
 $("setBtn").onclick = askKey;
+if (SERVER){
+  $("keyTitle").textContent = "Einstellungen";
+  $("serverInfo").style.display = "block"; $("keyInfo").style.display = "none";
+  $("keyInput").placeholder = "Eigener Schlüssel (optional)";
+}
 document.querySelectorAll('input[name=duck]').forEach(el => {
   el.checked = el.value === store.get("duckMode", "duck");
   el.onchange = () => { if (el.checked) store.set("duckMode", el.value); };
@@ -780,7 +802,7 @@ $("speakTest").onclick = async () => {
 // Diagnose: prüft Schlüssel, Rundkurs ohne und mit Wald-Gewichtung
 $("keyTest").onclick = async () => {
   const out = $("keyTestOut"), key = $("keyInput").value.trim();
-  if (!key){ out.textContent = "Bitte zuerst den Schlüssel einfügen."; return; }
+  if (!key && !SERVER){ out.textContent = "Bitte zuerst den Schlüssel einfügen."; return; }
   const old = getKey(); store.set("orsKey", key);
   const c = start || map.getCenter();
   const lines = [];
@@ -830,8 +852,9 @@ function countRequest(r){
 }
 function usageText(){
   const u = usage();
-  let t = `Heute verbraucht: ${u.n} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).`;
-  if (typeof u.remaining === "number" && isFinite(u.remaining)) t += `\nLaut Routendienst noch übrig: ${u.remaining}.`;
+  let t = viaServer() ? `Über den Waldläufer-Server. Heute von diesem Gerät: ${u.n} Routen-Anfragen.`
+                      : `Heute verbraucht: ${u.n} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).`;
+  if (typeof u.remaining === "number" && isFinite(u.remaining)) t += viaServer() ? `\nKontingent des Servers heute noch: ${u.remaining}.` : `\nLaut Routendienst noch übrig: ${u.remaining}.`;
   if (u.reset && u.reset > Date.now()) t += `\nKontingent wird zurückgesetzt: ${new Date(u.reset).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}.`;
   return t;
 }
@@ -856,11 +879,17 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
                  extra_info: useGreenExtra ? ["waytype", "surface", "green"] : ["waytype", "surface"], instructions: true, language: "de", units: "m" };
   let r;
   try {
-    r = await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
-      method: "POST",
-      headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
-      body: JSON.stringify(body)
-    });
+    r = viaServer()
+      ? await fetch(`${SERVER}/route/${profile}`, {
+          method: "POST",
+          headers: { "X-Install-Id": installId(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
+          body: JSON.stringify(body)
+        })
+      : await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
+          method: "POST",
+          headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
+          body: JSON.stringify(body)
+        });
   } catch(e){ throw Object.assign(new Error("Keine Verbindung zum Routendienst (" + (e && e.message || e) + ")"), { code: "net" }); }
   countRequest(r);
   let j = null, msg = "";
@@ -1232,7 +1261,7 @@ async function search(){
   if (searching) return;
   if (nav.active) stopNav(true);   // laufende Navigation gehört zur alten Route
   if (!start){ status("Bitte zuerst einen Startpunkt wählen (Karte antippen oder 📍)."); return; }
-  if (!getKey()){ await askKey(); if (!getKey()) return; }
+  if (!viaServer() && !getKey()){ await askKey(); if (!getKey()) return; }
   const target = km();
   searching = true; $("go").disabled = true; closeDropdown();
   clearRoutes(); results = []; setLocked(true);
@@ -1751,9 +1780,9 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { ads, ADS, adBanner, adAfterSearch, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { viaServer, installId, get SERVER(){ return SERVER; }, ads, ADS, adBanner, adAfterSearch, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
-if (!getKey()) setTimeout(askKey, 600);
+if (!SERVER && !getKey()) setTimeout(askKey, 600);
 })();
 </script>
 </body>

@@ -17,6 +17,7 @@ Rechtliche und steuerliche Punkte ersetzen keine Beratung durch Fachleute.
 | Akku-Optimierung | Store-konform: öffnet die Android-Einstellungsseite statt des direkten Dialogs; Berechtigung `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` entfernt |
 | Werbung (AdMob) | eingebaut, **nur Google-Test-Werbung**: Einwilligungsfenster (UMP/TCF), Banner unten, Vollbild nach jeder 3. Suche, keine Werbung während der Navigation, Knopf „Datenschutz-Einstellungen (Werbung)“ unter ⚙️ |
 | AdMob-App-ID | wird beim Bauen aus der GitHub-Variable `ADMOB_APP_ID` gelesen; fehlt sie, wird Googles Test-ID verwendet |
+| Vermittlungs-Server | Cloudflare Worker im Ordner `server/` gebaut und getestet; Einrichtung siehe B3. Die App nutzt ihn automatisch, sobald seine Adresse in `www/config.js` steht |
 | Test-APKs | jeder Bau auf einem Testzweig erscheint als „Pre-release“ unter Releases (der feste Download-Link der Alltags-App bleibt unberührt) |
 | Eigene Test-Kennung | Der Zweig baut „Waldläufer Test“ (`de.waldlaeufer.test`) – läuft **neben** der Alltags-App. Vor der Veröffentlichung wieder auf `de.waldlaeufer.app` stellen. |
 
@@ -44,19 +45,31 @@ Rechtliche und steuerliche Punkte ersetzen keine Beratung durch Fachleute.
    Sperre des AdMob-Kontos führen. Zum Testen bleibt `testing: true`.
 7. Später: Datei `app-ads.txt` auf einer eigenen Website hinterlegen (AdMob zeigt den Inhalt an).
 
-### B3. Routing für alle Nutzer (wichtigste Entscheidung)
-Im Moment braucht jeder Nutzer einen eigenen openrouteservice-Schlüssel. Für den Store muss die App ohne
-Schlüssel funktionieren. Eine Suche braucht 10–20 Anfragen.
+### B3. Routing für alle Nutzer – Vermittlungs-Server (gebaut, muss noch eingerichtet werden)
+Der Server liegt im Ordner `server/` (Cloudflare Worker). Er verwahrt deinen openrouteservice-Schlüssel,
+lässt nur Rundkurs- und Ortsanfragen durch und begrenzt: höchstens 30 Anfragen pro Gerät und Minute,
+insgesamt knapp unter dem Minutenlimit von openrouteservice. Die App braucht dann **keinen** Schlüssel mehr.
+Kapazität mit dem kostenlosen openrouteservice-Kontingent: ca. 100–200 Suchen pro Tag für alle Nutzer
+zusammen. Wächst die Nutzerzahl darüber hinaus: openrouteservice selbst betreiben oder einen bezahlten
+Routing-Dienst nehmen (der Server bleibt dabei die Zwischenstation, die App muss nicht geändert werden).
+Vorher klären: Ob der kostenlose openrouteservice-Zugang mit Werbeeinnahmen genutzt werden darf, ist auf
+deren Seite nicht eindeutig – kurz bei HeiGIT anfragen.
 
-| Möglichkeit | Kapazität | Kosten (Richtwert) | Aufwand |
-|---|---|---|---|
-| **a) Kleiner Vermittlungs-Server** (z. B. Cloudflare Worker) mit *deinem* openrouteservice-Schlüssel, Limit pro Nutzer | ca. 100–200 Suchen/Tag insgesamt (Kontingent 2000 Anfragen/Tag) | 0 € | gering – Claude kann den Code schreiben |
-| **b) openrouteservice selbst betreiben** (eigener Server, Deutschland-Karte) | praktisch unbegrenzt | Server mit viel Arbeitsspeicher, grob zweistellige €/Monat | mittel – Einrichtung und Updates der Kartendaten |
-| **c) Bezahlter Routing-Dienst** (z. B. GraphHopper, kann ebenfalls Rundkurse) | nach Tarif | nach Tarif | mittel – App muss angepasst werden |
+**Einrichtung (einmalig, ca. 10 Minuten):**
+1. Kostenloses Konto auf https://dash.cloudflare.com anlegen.
+2. Links „Workers & Pages“ öffnen. Beim ersten Mal fragt Cloudflare nach einer **workers.dev-Subdomain**
+   (frei wählbar, z. B. `waldlaeufer`) – festlegen.
+3. **Konto-ID** kopieren (steht auf der Übersichtsseite von „Workers & Pages“ rechts als „Account ID“).
+4. **API-Token** anlegen: oben rechts Profil → „My Profile“ → „API Tokens“ → „Create Token“ →
+   Vorlage **„Edit Cloudflare Workers“** → „Use template“ → bei Konto/Zone „All“ lassen → „Continue“ →
+   „Create Token“ → Token kopieren (wird nur einmal angezeigt).
+5. In GitHub: Repository → Settings → Secrets and variables → Actions → **New repository secret**,
+   drei Einträge: `CLOUDFLARE_API_TOKEN` (Token), `CLOUDFLARE_ACCOUNT_ID` (Konto-ID),
+   `ORS_API_KEY` (dein openrouteservice-Schlüssel). Secrets sind danach für niemanden mehr lesbar.
+6. Claude Bescheid geben → der Server wird automatisch eingerichtet (Ablauf „Server einrichten“),
+   die Adresse wird in `www/config.js` eingetragen, und die nächste Test-APK nutzt den Server.
 
-**Empfehlung:** Mit **a)** in die Testphase und den Start gehen; bei wachsender Nutzerzahl auf **b)** umsteigen.
-Vorher klären: Ob der kostenlose openrouteservice-Zugang kommerziell (mit Werbung) genutzt werden darf, ist
-auf deren Seite nicht eindeutig – kurz bei HeiGIT anfragen.
+**Bitte Schlüssel und Token nie in den Chat kopieren** – nur direkt in GitHub eintragen.
 
 ### B4. Kartenanbieter
 Die jetzigen Karten (OpenTopoMap, OpenStreetMap-Server, Esri-Satellit) sind für Apps mit Einnahmen nicht
@@ -87,7 +100,7 @@ Den Schlüssel sicher aufbewahren – ohne ihn lassen sich keine Updates mehr ho
 ## Teil C – empfohlene Reihenfolge
 
 1. Test-APK vom Zweig `playstore` ausprobieren (läuft alles mit Android 16 / Capacitor 8? erscheint Test-Werbung?).
-2. B3 entscheiden → Claude baut Vermittlungs-Server und entfernt die Schlüssel-Eingabe aus der App.
+2. B3 Server einrichten (Cloudflare-Konto + 3 GitHub-Secrets) → App nutzt den Server, kein Schlüssel mehr nötig.
 3. B4 Kartenkonto → Claude stellt die Karten um.
 4. B1 + B2 Konten anlegen, B2 IDs eintragen.
 5. B5 Signatur → Claude stellt den Bau auf AAB um.
