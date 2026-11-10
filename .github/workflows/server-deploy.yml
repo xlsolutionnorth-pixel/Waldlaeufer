@@ -1,0 +1,111 @@
+name: Server einrichten
+
+# Richtet den Waldläufer-Vermittlungs-Server bei Cloudflare ein bzw. aktualisiert ihn.
+#
+# Benötigte Repository-Secrets (Settings → Secrets and variables → Actions → Secrets):
+#   CLOUDFLARE_API_TOKEN   – Cloudflare-API-Token (Vorlage „Edit Cloudflare Workers“)
+#   CLOUDFLARE_ACCOUNT_ID  – Cloudflare-Konto-ID
+#   ORS_API_KEY            – dein openrouteservice-Schlüssel (bleibt auf dem Server, nie in der App)
+#
+# Optionale Repository-Variablen für den Notfall (Settings → Secrets and variables → Actions → Variables):
+#   ORS_BASE_URL     – anderer Routing-Server, z. B. https://ors.meine-domain.de/ors
+#   PELIAS_BASE_URL  – andere Ortssuche
+#   DAILY_SEARCHES   – Suchen pro Gerät und Tag (Standard 10, 0 = unbegrenzt)
+#   BUSY_RESERVE     – Reserve im Tageskontingent für laufende Suchen (Standard 60)
+#   STATUS_MESSAGE   – Hinweis, den die App beim Start anzeigt (leer lassen = keiner)
+# Nach einer Änderung: Actions → „Server einrichten“ → „Run workflow“.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-deploy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Server testen
+        run: node --import ./server/test/setup.mjs --test server/test/*.test.mjs
+
+      - name: Einstellungen aus GitHub-Variablen übernehmen
+        env:
+          ORS_BASE_URL: ${{ vars.ORS_BASE_URL }}
+          PELIAS_BASE_URL: ${{ vars.PELIAS_BASE_URL }}
+          DAILY_SEARCHES: ${{ vars.DAILY_SEARCHES }}
+          BUSY_RESERVE: ${{ vars.BUSY_RESERVE }}
+          STATUS_MESSAGE: ${{ vars.STATUS_MESSAGE }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re
+          p = "server/wrangler.toml"; s = open(p, encoding="utf-8").read()
+          for env_name, key in [("ORS_BASE_URL","ORS_BASE"),("PELIAS_BASE_URL","PELIAS_BASE"),("DAILY_SEARCHES","DAILY_SEARCHES"),("BUSY_RESERVE","BUSY_RESERVE"),("STATUS_MESSAGE","STATUS_MESSAGE")]:
+              v = os.environ.get(env_name, "")
+              if v == "" and key != "STATUS_MESSAGE":
+                  continue
+              s = re.sub(rf'^{key} = .*$', f'{key} = {json.dumps(v, ensure_ascii=False)}', s, count=1, flags=re.M)
+              print(f"{key} = {v if key != 'STATUS_MESSAGE' else (v or '(keine)')}")
+          open(p, "w", encoding="utf-8").write(s)
+          PY
+
+      - name: Secrets vorhanden?
+        id: check
+        env:
+          T: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          A: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          K: ${{ secrets.ORS_API_KEY }}
+          B: ${{ vars.ORS_BASE_URL }}
+        run: |
+          missing=""
+          [ -n "$T" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$A" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          # Schlüssel nur nötig, solange der öffentliche openrouteservice (HeiGIT) genutzt wird
+          if [ -z "$K" ] && { [ -z "$B" ] || echo "$B" | grep -q "api.heigit.org"; }; then missing="$missing ORS_API_KEY"; fi
+          if [ -n "$missing" ]; then
+            echo "::warning::Server wird noch nicht eingerichtet – es fehlen die Secrets:$missing"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+          [ -n "$K" ] && echo "haskey=true" >> "$GITHUB_OUTPUT" || echo "haskey=false" >> "$GITHUB_OUTPUT"
+
+      - name: Bei Cloudflare einrichten (mit Schlüssel)
+        if: steps.check.outputs.ready == 'true' && steps.check.outputs.haskey == 'true'
+        id: deploy1
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+          secrets: |
+            ORS_API_KEY
+        env:
+          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+
+      - name: Bei Cloudflare einrichten (eigener Routing-Server ohne Schlüssel)
+        if: steps.check.outputs.ready == 'true' && steps.check.outputs.haskey != 'true'
+        id: deploy2
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: server
+
+      - name: Server prüfen
+        if: steps.check.outputs.ready == 'true'
+        env:
+          URL: ${{ steps.deploy1.outputs.deployment-url || steps.deploy2.outputs.deployment-url }}
+        run: |
+          echo "### Waldläufer-Server" >> "$GITHUB_STEP_SUMMARY"
+          echo "Adresse: $URL" | tee -a "$GITHUB_STEP_SUMMARY"
+          sleep 5
+          curl -sS --max-time 20 "$URL/health" | tee -a "$GITHUB_STEP_SUMMARY"; echo
+          curl -sS --max-time 20 "$URL/status" | tee -a "$GITHUB_STEP_SUMMARY"; echo

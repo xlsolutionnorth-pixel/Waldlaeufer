@@ -1,0 +1,93 @@
+name: Kontingent überwachen
+
+# Prüft stündlich, wie viel vom Tageskontingent des Routendienstes noch übrig ist.
+# Wird es knapp (unter 20 %), ist es aufgebraucht oder ist der Server nicht erreichbar,
+# legt dieser Ablauf ein GitHub-Issue an – GitHub schickt dir dazu eine E-Mail.
+# Ist wieder alles normal, wird das Issue automatisch geschlossen.
+#
+# Server-Adresse: Repository-Variable WALDLAEUFER_SERVER_URL, sonst aus www/config.js
+# (Zweig main bzw. playstore).
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Server-Adresse ermitteln
+        id: url
+        env:
+          VAR_URL: ${{ vars.WALDLAEUFER_SERVER_URL }}
+        run: |
+          URL="$VAR_URL"
+          if [ -z "$URL" ]; then
+            for ref in main playstore; do
+              git fetch -q --depth=1 origin "$ref" 2>/dev/null || continue
+              URL=$(git show "FETCH_HEAD:www/config.js" 2>/dev/null | sed -nE 's/.*serverUrl: *"([^"]*)".*/\1/p' | head -1)
+              [ -n "$URL" ] && break
+            done
+          fi
+          echo "url=${URL%/}" >> "$GITHUB_OUTPUT"
+          [ -n "$URL" ] && echo "Server: $URL" || echo "Noch kein Server eingetragen – nichts zu prüfen."
+
+      - name: Kontingent prüfen
+        if: steps.url.outputs.url != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          URL: ${{ steps.url.outputs.url }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, urllib.request
+          url, owner, repo = os.environ["URL"], os.environ["OWNER"], os.environ["REPO"]
+          LABEL = "kontingent-warnung"
+          def gh(*a, check=True):
+              return subprocess.run(["gh", *a, "--repo", repo], capture_output=True, text=True, check=check).stdout
+          problem, details = None, ""
+          try:
+              with urllib.request.urlopen(url + "/status", timeout=20) as r:
+                  s = json.load(r)
+              limit = s.get("limit") or 2000
+              rem = s.get("remaining")
+              details = (f"- Übrig heute: **{rem if rem is not None else 'noch unbekannt'}** von {limit}\n"
+                         f"- Suchen heute: {s.get('searchesToday', 0)} von {s.get('devicesToday', 0)} Geräten\n"
+                         f"- Aus dem Zwischenspeicher: {s.get('cacheHitsToday', 0)}\n"
+                         f"- Routing-Quelle: {s.get('upstream')}\n"
+                         f"- Tageslimit je Gerät: {s.get('dailySearchesPerDevice')}\n")
+              print(details)
+              if s.get("exhaustedUntil"):
+                  problem = f"Kontingent aufgebraucht (gesperrt bis {s['exhaustedUntil']})"
+              elif rem is not None and rem < 0.2 * limit:
+                  problem = f"Kontingent fast aufgebraucht ({rem} von {limit} übrig)"
+          except Exception as e:
+              problem = "Server nicht erreichbar"
+              details = f"Fehler beim Abruf von {url}/status: {e}\n"
+          subprocess.run(["gh", "label", "create", LABEL, "--color", "d93f0b", "--force", "--repo", repo], capture_output=True)
+          open_issues = json.loads(gh("issue", "list", "--label", LABEL, "--state", "open", "--json", "number"))
+          if problem:
+              if open_issues:
+                  print("Warnung besteht bereits: #%d" % open_issues[0]["number"])
+              else:
+                  body = (f"@{owner} – automatische Warnung vom Waldläufer-Server.\n\n**{problem}**\n\n{details}\n"
+                          "**Was tun?** Siehe Notfallplan in `NOTFALLPLAN.md`:\n"
+                          "1. Sofort: GitHub-Variable `STATUS_MESSAGE` setzen (Hinweis in der App) und/oder `DAILY_SEARCHES` senken, "
+                          "dann Actions → „Server einrichten“ → „Run workflow“.\n"
+                          "2. Dauerhaft: eigenen Routing-Server oder bezahlten Dienst einrichten und `ORS_BASE_URL` setzen.\n\n"
+                          "Dieses Issue schließt sich automatisch, sobald wieder alles normal ist.")
+                  gh("issue", "create", "--title", f"⚠ Waldläufer: {problem}", "--label", LABEL, "--body", body)
+                  print("Warnung angelegt.")
+          else:
+              for i in open_issues:
+                  gh("issue", "close", str(i["number"]), "--comment", "✅ Wieder normal:\n\n" + details)
+                  print("Warnung #%d geschlossen." % i["number"])
+          PY

@@ -1,0 +1,40 @@
+# Waldläufer-Vermittlungs-Server – wird über .github/workflows/server-deploy.yml eingerichtet.
+# Adresse danach: https://waldlaeufer-api.<dein-workers-subdomain>.workers.dev
+name = "waldlaeufer-api"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+workers_dev = true
+
+# Einstellungen – im Notfall über GitHub-Variablen überschreibbar (siehe PLAYSTORE.md, Notfallplan)
+[vars]
+ORS_BASE = "https://api.heigit.org/openrouteservice"
+PELIAS_BASE = "https://api.heigit.org/pelias/v1"
+DAILY_SEARCHES = "10"
+BUSY_RESERVE = "60"
+STATUS_MESSAGE = ""
+
+# Gedächtnis des Servers (Suchen je Gerät, Kontingent, Zwischenspeicher) – SQLite, im Gratis-Tarif enthalten
+[[durable_objects.bindings]]
+name = "ZENTRALE"
+class_name = "Zentrale"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Zentrale"]
+
+# Begrenzungen pro Minute (Zähler je Cloudflare-Standort, ungefähr):
+# Gerät: höchstens 30 Anfragen – eine Suche braucht bis zu 20, Ortssuche einige wenige.
+[[ratelimits]]
+name = "RL_DEVICE"
+namespace_id = "41001"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+# Gesamt: knapp unter dem Minutenlimit von openrouteservice (40/Min.) – die App wartet dann kurz.
+[[ratelimits]]
+name = "RL_TOTAL"
+namespace_id = "41002"
+  [ratelimits.simple]
+  limit = 38
+  period = 60
