@@ -813,7 +813,7 @@ $("keyTest").onclick = async () => {
   for (const [prof, nat, label] of tests){
     try {
       weightMode = 0;
-      const f = await orsRoundTrip(prof, 5000, 4, 1, nat, { lat: c.lat, lng: c.lng });
+      const f = await orsRoundTrip(prof, 5000, 4, 1, nat, { lat: c.lat, lng: c.lng, sid: "verbindungstest-" + new Date().toISOString().slice(0, 10) });
       const d = f ? f.properties.summary.distance / 1000 : 0;
       log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
     } catch(e){
@@ -861,7 +861,11 @@ function usageText(){
 
 // openrouteservice antwortet mit 403 sowohl bei falschem Schlüssel als auch bei aufgebrauchtem Kontingent –
 // deshalb wird die Meldung des Servers ausgewertet und angezeigt.
-function orsError(status, msg){
+function orsError(status, msg, reason, retryAfter){
+  // Gründe vom Waldläufer-Server: freundliche Meldungen statt Fehler
+  if (reason === "device-daily") return Object.assign(new Error(msg || "Tageslimit erreicht"), { code: "daily", retryAfter });
+  if (reason === "busy") return Object.assign(new Error(msg || "Gerade sehr viele Anfragen"), { code: "busy", retryAfter });
+  if (reason === "device-minute" || reason === "total-minute") return Object.assign(new Error(msg || "Zu viele Anfragen pro Minute"), { code: "rate", retryAfter });
   const m = msg ? ` (Server: ${msg})` : "";
   if ((status === 403 || status === 429) && /quota|limit|exceed|rate/i.test(msg || ""))
     return Object.assign(new Error("Kontingent des Routendienstes aufgebraucht" + m), { code: status === 429 ? "rate" : "quota" });
@@ -870,6 +874,7 @@ function orsError(status, msg){
   return Object.assign(new Error(msg || ("HTTP " + status)), { code: "api", status });
 }
 
+let currentSearchId = "";
 async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
   opts = opts || {};
   const options = { round_trip: { length: Math.round(lengthM), points, seed } };
@@ -882,7 +887,7 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
     r = viaServer()
       ? await fetch(`${SERVER}/route/${profile}`, {
           method: "POST",
-          headers: { "X-Install-Id": installId(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
+          headers: { "X-Install-Id": installId(), "X-Search-Id": opts.sid || currentSearchId || "einzel-" + Date.now().toString(36), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
           body: JSON.stringify(body)
         })
       : await fetch(`${ORS}/v2/directions/${profile}/geojson`, {
@@ -892,13 +897,15 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
         });
   } catch(e){ throw Object.assign(new Error("Keine Verbindung zum Routendienst (" + (e && e.message || e) + ")"), { code: "net" }); }
   countRequest(r);
-  let j = null, msg = "";
+  let j = null, msg = "", reason = "", retryAfter = 0;
   try {
     const txt = await r.text();
     try { j = JSON.parse(txt); } catch(e){ msg = txt.slice(0, 160); }
     if (j && j.error) msg = typeof j.error === "string" ? j.error : (j.error.message || JSON.stringify(j.error));
     else if (j && j.message && !r.ok) msg = j.message;
+    if (j && j.error && typeof j.error === "object"){ reason = j.error.reason || ""; retryAfter = Number(j.error.retryAfter) || 0; }
   } catch(e){}
+  if (r.ok && j && j.features && j.features[0]) j.features[0]._cached = (r.headers && r.headers.get && r.headers.get("X-Cache")) === "HIT";
   if (!r.ok){
     if (r.status === 400){
       const extraProblem = /extra/i.test(msg) && useGreenExtra;
@@ -911,7 +918,7 @@ async function orsRoundTrip(profile, lengthM, points, seed, nature, opts){
         return orsRoundTrip(profile, lengthM, points, seed, nature, opts);
       }
     }
-    throw orsError(r.status, msg);
+    throw orsError(r.status, msg, reason, retryAfter);
   }
   return j && j.features && j.features[0];
 }
@@ -1268,7 +1275,15 @@ async function search(){
   setProgress(0.02);
 
   const found = [], near = [];
-  let requests = 0, okCount = 0, errCount = 0, lastErr = "", stopped = "", rateWaits = 0;
+  let requests = 0, okCount = 0, errCount = 0, lastErr = "", stopped = "", rateWaits = 0, stopInfo = 0;
+  currentSearchId = "s-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+  const vKey = `${start.lat.toFixed(4)},${start.lng.toFixed(4)},${target}`;
+  let variants = {}; try { variants = JSON.parse(store.get("variants", "{}")) || {}; } catch(e){}
+  const variant = variants[vKey] || 0;
+  variants[vKey] = variant + 1;
+  const vk = Object.keys(variants); if (vk.length > 200) vk.slice(0, vk.length - 200).forEach(k => delete variants[k]);
+  store.set("variants", JSON.stringify(variants));
+  const seedFor = (n) => { let h = 2166136261; for (const ch of `${vKey}|${variant}|${n}`) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0) % 100000; };
   // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
   const phases = [
     { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 15 },
@@ -1289,13 +1304,14 @@ async function search(){
         status(`${ph.label} … ${found.length} passende Runde${found.length === 1 ? "" : "n"} (Versuch ${requests}/${MAX_REQUESTS})`);
         setProgress(requests / MAX_REQUESTS);
         const points = [5, 4, 6, 5, 7, 4][requests % 6];   // mehr Punkte = rundere Runde, weniger Hin-und-zurück
-        const seed = Math.floor(Math.random() * 10000);
-        const jitter = 0.92 + Math.random() * 0.16;
+        const seed = seedFor(requests);
+        const jitter = 0.92 + (seedFor(requests + 1000) % 1600) / 10000;
         let f;
         try { f = await orsRoundTrip(ph.profile, target * 1000 * factor * jitter, points, seed, ph.nature); }
         catch(e){
           errCount++; lastErr = e.message;
           if (e.code === "key"){ stopped = "key"; break; }
+          if (e.code === "daily" || e.code === "busy"){ stopped = e.code; stopInfo = e.retryAfter || 0; break; }
           // "Quota exceeded" kommt beim kostenlosen Zugang auch, wenn nur das Minutenlimit (40/Min.) erreicht ist.
           // Darum erst eine Minute warten und es erneut versuchen – erst wenn es dann wieder kommt, ist der Tag aufgebraucht.
           if (e.code === "quota" || e.code === "rate"){
@@ -1326,13 +1342,18 @@ async function search(){
             }
           } else if (!near.some(o => isDuplicate(o, r))) near.push(r);
         }
-        await sleep(REQ_GAP_MS);
+        await sleep(f && f._cached ? 150 : REQ_GAP_MS);   // aus dem Zwischenspeicher: kein Warten nötig
       }
       store.set(fKey, String(factor));
     }
-    const stopNote = stopped === "quota" ? "Der Routendienst lehnt weitere Anfragen ab (Kontingent). Bitte in ein paar Minuten nochmal suchen – Stand unter ⚙️."
+    const later = sec => sec >= 5400 ? `etwa ${Math.round(sec / 3600)} Stunden` : sec >= 90 ? `etwa ${Math.round(sec / 60)} Minuten` : "einer Minute";
+    const keepWorking = " Gespeicherte Runden, „Letzte Suchen“ und die Navigation funktionieren weiter.";
+    const stopNote = stopped === "daily" ? `Für heute hast du alle Suchen aufgebraucht (Tageslimit). Morgen geht's weiter.${keepWorking}`
+                   : stopped === "busy" ? `Gerade sind sehr viele Läufer unterwegs – neue Suchen sind in ${later(stopInfo || 3600)} wieder möglich.${keepWorking}`
+                   : stopped === "quota" ? "Der Routendienst lehnt weitere Anfragen ab (Kontingent). Bitte in ein paar Minuten nochmal suchen – Stand unter ⚙️."
                    : stopped === "key" ? lastErr + " – bitte unter ⚙️ prüfen."
                    : stopped === "rate" ? "Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen." : "";
+    if ((stopped === "daily" || stopped === "busy") && !found.length && !near.length){ status(stopNote); toast(stopped === "daily" ? "Tageslimit erreicht" : "Gerade viel los – bitte später"); return; }
     if (stopped && !found.length && !near.length){ status(stopNote + (stopped === "quota" ? " " + lastErr.replace(/^Kontingent des Routendienstes aufgebraucht ?/, "") : "")); return; }
     if (!found.length){
       if (!okCount){ status("Der Routendienst hat keine Route geliefert" + (lastErr ? ": " + lastErr : ".")); return; }
@@ -1783,6 +1804,13 @@ function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;"
 window.__app = { viaServer, installId, get SERVER(){ return SERVER; }, ads, ADS, adBanner, adAfterSearch, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!SERVER && !getKey()) setTimeout(askKey, 600);
+if (SERVER) setTimeout(async () => {
+  try {
+    const r = await fetch(`${SERVER}/health`, { headers: { "Accept": "application/json" } });
+    const j = await r.json();
+    if (j && j.message){ status("ℹ " + j.message); toast(j.message); }
+  } catch(e){}
+}, 800);
 })();
 </script>
 </body>
