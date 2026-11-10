@@ -46,7 +46,7 @@ Rechtliche und steuerliche Punkte ersetzen keine Beratung durch Fachleute.
 7. Später: Datei `app-ads.txt` auf einer eigenen Website hinterlegen (AdMob zeigt den Inhalt an).
 
 ### B3. Routing für alle Nutzer – Vermittlungs-Server (gebaut, muss noch eingerichtet werden)
-Der Server liegt im Ordner `server/` (Cloudflare Worker). Er verwahrt deinen openrouteservice-Schlüssel,
+Der Server liegt im Zweig `main`, Ordner `server/` (Cloudflare Worker). Er verwahrt deinen openrouteservice-Schlüssel,
 lässt nur Rundkurs- und Ortsanfragen durch und begrenzt: höchstens 30 Anfragen pro Gerät und Minute,
 insgesamt knapp unter dem Minutenlimit von openrouteservice. Die App braucht dann **keinen** Schlüssel mehr.
 Kapazität mit dem kostenlosen openrouteservice-Kontingent: ca. 100–200 Suchen pro Tag für alle Nutzer
@@ -70,6 +70,12 @@ deren Seite nicht eindeutig – kurz bei HeiGIT anfragen.
    die Adresse wird in `www/config.js` eingetragen, und die nächste Test-APK nutzt den Server.
 
 **Bitte Schlüssel und Token nie in den Chat kopieren** – nur direkt in GitHub eintragen.
+
+**Wenn plötzlich sehr viele Nutzer kommen:** siehe `NOTFALLPLAN.md` (Zweig `main`). Kurz: Der Server
+speichert gleiche Suchen zwischen, begrenzt Suchen je Gerät und Tag, hält eine Reserve zurück und zeigt
+freundliche Meldungen statt Fehlern. Eine stündliche Prüfung schickt dir per GitHub eine E-Mail, wenn das
+Kontingent knapp wird. Sofortmaßnahmen und das Umstellen auf einen eigenen Routing-Server gehen über
+GitHub-Variablen und „Run workflow“ – ohne App-Update.
 
 ### B4. Kartenanbieter
 Die jetzigen Karten (OpenTopoMap, OpenStreetMap-Server, Esri-Satellit) sind für Apps mit Einnahmen nicht
