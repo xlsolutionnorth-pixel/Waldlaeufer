@@ -170,6 +170,11 @@ button{font-family:inherit}
 .actions button.txt{width:auto;border-radius:22px;padding:0 14px 0 11px;display:flex;gap:6px;font-size:14px;font-weight:500}
 .actions button.txt .i{width:18px;height:18px}
 .actions button.on .i{fill:currentColor}
+.actions{flex-wrap:wrap}
+.actions button.primary{flex-basis:100%;height:46px}
+.actions button.tile{flex:1;width:auto;height:54px;border-radius:14px;display:flex;flex-direction:column;justify-content:center;gap:3px;font-size:11.5px;font-weight:500;background:var(--panel-2);border-color:transparent}
+.actions button.tile .i{width:20px;height:20px}
+.actions button.tile.on{color:var(--accent);background:var(--soft)}
 
 /* ---------- Fenster ---------- */
 .modal{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
@@ -306,6 +311,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
   <symbol id="i-place" viewBox="0 0 24 24"><path d="M12 21.5s7-7 7-12.5a7 7 0 0 0-14 0c0 5.5 7 12.5 7 12.5z"/><path d="M12 6.3l.9 1.9 2 .3-1.5 1.4.4 2-1.8-1-1.8 1 .4-2-1.5-1.4 2-.3z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-gesture" viewBox="0 0 24 24"><path d="M3 18c2.5-4 4.5-7 6.5-7 2.3 0 .8 6 3.3 6 2.2 0 2.7-6 5-6 1.2 0 1.8 1.2 2.7 2.5"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3.5 8.5a2 2 0 0 1 2-2h2.3l1.7-2.5h5l1.7 2.5h2.3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+  <symbol id="i-clean" viewBox="0 0 24 24"><path d="M10.5 3.5l1.3 3.7 3.7 1.3-3.7 1.3-1.3 3.7-1.3-3.7-3.7-1.3 3.7-1.3z"/><path d="M17.5 12.5l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z"/><path d="M5.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".7" fill="currentColor"/></symbol>
 </svg>
 <div id="map"></div>
@@ -1777,7 +1783,7 @@ function render(keepView){
         <span class="km">${fmt(r.distKm)} km</span>
         <span class="kv" title="Laufzeit bei ${paceLabel()} min/km">${ic("timer")}${durText(r)}</span>
         <span class="kv" title="Höhenmeter bergauf">${ic("mountain")}${r.ascent} m</span>
-        <span class="tags">${r.clean ? `<span class="tag" title="sauberer Rundkurs">${ic("loop")}</span>` : ""}${r.drawn ? `<span class="tag" title="nach deiner Skizze">${ic("gesture")}</span>` : ""}${r.edited ? `<span class="tag" title="von dir bearbeitet">${ic("edit")}</span>` : ""}</span>
+        <span class="tags">${r.clean ? `<span class="tag" title="sauberer Rundkurs">${ic("loop")}</span>` : ""}${r.drawn ? `<span class="tag" title="nach deiner Skizze">${ic("gesture")}</span>` : ""}${r.edited ? `<span class="tag" title="von dir bearbeitet">${ic("edit")}</span>` : ""}${r.cleaned ? `<span class="tag" title="bereinigt">${ic("clean")}</span>` : ""}</span>
       </div>
       <div class="bar">
         <span style="width:${pc(r.nature)}%;background:var(--c-nature)"></span>
@@ -1802,13 +1808,15 @@ function render(keepView){
       ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
         <button class="primary" data-a="run">${ic("play")}Start</button>
-        <button data-a="edit" class="txt" title="Punkte verschieben" aria-label="Anpassen">${ic("edit")}Anpassen</button>
-        <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
-        <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
+        <button data-a="edit" class="tile" title="Punkte verschieben">${ic("edit")}Anpassen</button>
+        <button data-a="clean" class="tile" title="Doppelte Stücke, Stichwege und Kreuzungen entfernen">${ic("clean")}Bereinigen</button>
+        <button data-a="rev" class="tile" title="Richtung umkehren">${ic("swap")}Umkehren</button>
+        <button data-a="save" class="tile ${isSaved(r) ? "on" : ""}" title="Speichern">${ic("bookmark")}Speichern</button>
       </div>`;
     c.onclick = (e) => {
       const btn = e.target.closest("button"), a = btn && btn.dataset.a;
       if (a === "run"){ const id = results[i].id; if (edit.on) endEdit(true); return startNav(results.find(x => x.id === id) || r); }
+      if (a === "clean"){ if (nav.active){ toast("Erst die Navigation beenden"); return; } return cleanRoute(r.id); }
       if (a === "save"){ toggleSave(r); btn.classList.toggle("on", isSaved(r)); return; }
       if (a === "edit"){ if (nav.active){ toast("Erst die Navigation beenden"); return; } return edit.on && edit.i === i ? endEdit(true) : startEdit(i); }
       if (a === "rev"){
@@ -2234,6 +2242,62 @@ async function reroute(){
   }
 }
 
+/* ---------- Runde bereinigen (Testzweig) ---------- */
+// Legt Zwischenpunkte auf die Runde, lässt die Punkte weg, die doppelte Stücke oder Kreuzungen
+// verursachen, und lässt den Routendienst neu rechnen. Stichwege werden dabei wie immer herausgeschnitten.
+// Bis zu 3 Durchgänge; übernommen wird nur, was wirklich sauberer ist.
+let cleaning = false;
+function messKey(r){ return (r.crossCount || 0) * 35 + (r.overlap || 0) * 300; }
+function badVias(r, vias){
+  const cum = r.cum || (r.cum = cumulative(r.coords)), bad = new Set();
+  const pos = vias.map(v => nearestOnRoute(r.coords, cum, v).pos);
+  (r.doubledRanges || []).forEach(x => {
+    let hit = false;
+    pos.forEach((d, k) => { if (d >= x[0] - 80 && d <= x[1] + 80){ bad.add(k); hit = true; } });
+    if (!hit && pos.length){ const mid = (x[0] + x[1]) / 2; let kb = 0; pos.forEach((d, k) => { if (Math.abs(d - mid) < Math.abs(pos[kb] - mid)) kb = k; }); bad.add(kb); }
+  });
+  (r.crossPts || []).forEach(c => {
+    let hit = false;
+    vias.forEach((v, k) => { if (fastD(c, v) < 250){ bad.add(k); hit = true; } });
+    if (!hit && vias.length){ let kb = 0; vias.forEach((v, k) => { if (fastD(c, v) < fastD(c, vias[kb])) kb = k; }); bad.add(kb); }
+  });
+  return bad;
+}
+async function cleanRoute(id){
+  if (cleaning || searching) return;
+  if (edit.on) endEdit(true);
+  let i = results.findIndex(x => x.id === id); const r0 = results[i]; if (!r0) return;
+  if (r0.crossCount === 0 && r0.overlap < 0.01){ toast("Diese Runde ist schon sauber"); return; }
+  if (!getKey()){ await askKey(); if (!getKey()) return; }
+  cleaning = true; busy(true, "Runde wird bereinigt …");
+  const profile = r0.profile || (r0.relaxed ? "foot-walking" : "foot-hiking"), nature = !r0.relaxed;
+  let best = r0, vias = r0.vias && r0.vias.length ? snapToRoute(r0, r0.vias) : viaPoints(r0), tries = 0;
+  try {
+    for (let it = 0; it < 3; it++){
+      const bad = badVias(best, vias);
+      if (!bad.size || bad.size >= vias.length) break;
+      const keep = vias.filter((v, k) => !bad.has(k));
+      let r;
+      try { r = await buildViaRoute([[start.lat, start.lng], ...keep, [start.lat, start.lng]], profile, nature, 250); tries++; }
+      catch(e){ if (e.code === "key" || e.code === "quota" || e.code === "net" || e.code === "rate") throw e; break; }
+      if (messKey(r) < messKey(best) - 1 && r.distKm >= r0.distKm * 0.7){ best = r; vias = r.vias; }
+      else { vias = keep; }   // trotzdem mit weniger Punkten weiterprobieren
+      if (best.crossCount === 0 && best.overlap < 0.01) break;
+      await sleep(REQ_GAP_MS);
+    }
+  } catch(e){
+    toast(e.code === "key" ? "Schlüssel abgelehnt" : e.code === "net" ? "Keine Verbindung" : "Routendienst bremst – gleich nochmal");
+  } finally { cleaning = false; busy(false); }
+  if (best === r0){ toast(tries ? "Keine sauberere Variante gefunden" : "Hier lässt sich nichts verbessern"); return; }
+  if (r0.drawn && draw.sk){ const q = sketchFit(best, draw.sk); Object.assign(best, { drawn: true, sketchDev: q.dev, sketchCover: q.cover }); }
+  best.cleaned = true; best.dev = best.distKm - km();
+  i = results.findIndex(x => x.id === id);
+  if (i < 0) return;
+  results[i] = best; selected = i; render(true);
+  const pc = v => Math.round(v * 100);
+  toast(`Bereinigt: doppelt ${pc(r0.overlap)} → ${pc(best.overlap)} %, Kreuzungen ${r0.crossCount} → ${best.crossCount}`);
+}
+
 /* ---------- Route von Hand zeichnen ---------- */
 // Mit dem Finger eine Runde auf die Karte malen. Daraus werden mehrere Varianten mit unterschiedlich
 // vielen Zwischenpunkten berechnet; die beste wird gezielt dort nachgebessert, wo sie von der Skizze abweicht.
@@ -2555,7 +2619,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { snapshotRun, offerPhoto, renderShot, shot, snap: snapToRoute, edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { cleanRoute, badVias, snapshotRun, offerPhoto, renderShot, shot, snap: snapToRoute, edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
