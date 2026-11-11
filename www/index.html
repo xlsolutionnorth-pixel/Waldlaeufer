@@ -196,10 +196,14 @@ button{font-family:inherit}
 .keyrow .i{color:var(--muted)}
 .pacebox{display:flex;justify-content:center;align-items:baseline;gap:8px;margin:8px 0 2px;font-size:30px;font-weight:700}
 .pacebox small{font-size:14px;color:var(--muted);font-weight:500}
-.slider{display:flex;align-items:center;gap:10px;margin:14px 0 0;font-size:13px;color:var(--muted)}
-.slider span{width:62px}
-.slider input{flex:1;accent-color:var(--accent);height:28px}
-.slider output{width:44px;text-align:right;color:var(--ink);font-weight:600;font-size:15px}
+.dual{position:relative;height:44px;margin:16px 4px 0}
+.dual .track{position:absolute;left:13px;right:13px;top:19px;height:6px;border-radius:3px;background:var(--line)}
+.dual .fill{position:absolute;top:0;bottom:0;border-radius:3px;background:var(--accent)}
+.dual input{position:absolute;left:0;top:0;width:100%;height:44px;margin:0;background:none;pointer-events:none;-webkit-appearance:none;appearance:none;outline:none}
+.dual input::-webkit-slider-runnable-track{height:44px;background:transparent}
+.dual input::-webkit-slider-thumb{pointer-events:auto;-webkit-appearance:none;appearance:none;width:28px;height:28px;margin-top:8px;border-radius:50%;background:var(--accent);border:3px solid var(--panel);box-shadow:0 1px 6px rgba(0,0,0,.35);cursor:grab}
+.dual input::-moz-range-thumb{pointer-events:auto;width:24px;height:24px;border-radius:50%;background:var(--accent);border:3px solid var(--panel)}
+.dual-lab{display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin:2px 4px 0}
 
 /* ---------- Navigation ---------- */
 .nav{position:absolute;z-index:1100;top:calc(env(safe-area-inset-top) + 8px);left:8px;right:8px;display:none;
@@ -381,8 +385,10 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
   <div class="box">
     <h2><svg class="i"><use href="#i-timer"/></svg>Lauftempo</h2>
     <div class="pacebox"><span id="paceShow">5:00–6:00</span><small>min/km</small></div>
-    <div class="slider"><span>schnell</span><input type="range" id="paceA" min="180" max="720" step="5"><output id="paceAo"></output></div>
-    <div class="slider"><span>gemütlich</span><input type="range" id="paceB" min="180" max="720" step="5"><output id="paceBo"></output></div>
+    <div class="dual"><div class="track"><div class="fill" id="paceFill"></div></div>
+      <input type="range" id="paceA" min="180" max="540" step="5" aria-label="schnellstes Tempo">
+      <input type="range" id="paceB" min="180" max="540" step="5" aria-label="langsamstes Tempo"></div>
+    <div class="dual-lab"><span>schnell · 3:00</span><span>9:00 · gemütlich</span></div>
     <p style="margin-top:14px;display:flex;gap:8px;align-items:flex-start"><svg class="i s" style="margin-top:2px"><use href="#i-mountain"/></svg><span>Die Laufzeit berücksichtigt Steigungen: bergauf langsamer, leicht bergab etwas schneller.</span></p>
     <div class="btns"><button class="primary" id="paceOk">Fertig</button></div>
   </div>
@@ -1019,7 +1025,10 @@ function durText(r){
 }
 function showPace(){
   const a = +$("paceA").value, b = +$("paceB").value;
-  $("paceAo").textContent = fmtPace(a); $("paceBo").textContent = fmtPace(b);
+  const mn = 180, mx = 540, f = v => (v - mn) / (mx - mn) * 100;
+  $("paceFill").style.left = f(Math.min(a, b)) + "%"; $("paceFill").style.right = (100 - f(Math.max(a, b))) + "%";
+  // liegt der linke Regler ganz rechts, muss er oben liegen, damit man ihn wieder greifen kann
+  $("paceA").style.zIndex = a >= mx - 20 ? 3 : 1; $("paceB").style.zIndex = 2;
   $("paceShow").textContent = Math.min(a, b) === Math.max(a, b) ? fmtPace(a) : `${fmtPace(Math.min(a, b))}–${fmtPace(Math.max(a, b))}`;
 }
 $("paceTxt").textContent = paceLabel();
@@ -1741,7 +1750,6 @@ function render(keepView){
       ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
         <button class="primary" data-a="run">${ic("play")}Start</button>
-        <button data-a="edit" class="txt" title="Punkte verschieben" aria-label="Anpassen">${ic("edit")}Anpassen</button>
         <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
         <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
       </div>`;
@@ -2321,7 +2329,6 @@ async function sketchSearch(pts){
     addHistory(Math.round(results[0].distKm * 2) / 2, true);
     status(`${results.length} Variante${results.length === 1 ? "" : "n"} nach deiner Skizze`);
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
-  if (results.length && !nav.active){ startEdit(0); toast("Punkte ziehen zum Anpassen · ✓ wenn fertig"); }
 }
 
 /* ---------- Helfer ---------- */
