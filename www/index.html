@@ -236,8 +236,9 @@ body.navigating .topbar,body.navigating #suggest,body.navigating #layerBtn{displ
 .modebar button:disabled{opacity:.4}
 body.editing .topbar,body.drawing .topbar,body.editing #suggest,body.drawing #suggest{display:none}
 body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!important}
-.handle{margin:9px;width:18px;height:18px;border-radius:50%;background:#fff;border:4px solid var(--hc,#2c9a5a);box-shadow:0 1px 6px rgba(0,0,0,.45)}
+.handle{margin:6px;width:18px;height:18px;border-radius:50%;background:#fff;border:4px solid var(--hc,#2c9a5a);box-shadow:0 1px 6px rgba(0,0,0,.45)}
 .handle.busy{opacity:.5}
+.handle.ghost{margin:5px;width:14px;height:14px;border-width:3px;opacity:.8;background:color-mix(in srgb,var(--hc) 25%,#fff)}
 .leaflet-marker-draggable .handle{cursor:grab}
 #busy{position:absolute;z-index:1160;left:50%;top:calc(env(safe-area-inset-top) + 76px);transform:translateX(-50%);background:var(--panel);color:var(--ink);
   border-radius:18px;padding:7px 14px;font-size:13px;box-shadow:var(--shadow-s);display:none;align-items:center;gap:8px}
@@ -2114,7 +2115,7 @@ function setMode(kind){
   if (!kind){ bar.style.display = "none"; return; }
   bar.style.display = "flex";
   $("modeText").innerHTML = kind === "edit"
-    ? `${ic("edit")}<span>Punkte ziehen<small>Linie tippen: neuer Punkt</small></span>`
+    ? `${ic("edit")}<span>Punkte ziehen<small>Kleine Punkte = neuer Punkt</small></span>`
     : `${ic("draw")}<span>Runde zeichnen<small>Finger über die Karte ziehen</small></span>`;
   updateUndo();
 }
@@ -2166,7 +2167,7 @@ function drawnKey(r){ return (r.sketchDev ?? 500) + (r.crossCount || 0) * 35 + (
 // neu über alle Punkte – auf echten Wegen, wieder mit Vorliebe für Wald- und Feldwege.
 function viaPoints(r){
   const cum = r.cum || (r.cum = cumulative(r.coords)), total = cum[cum.length - 1];
-  const n = Math.max(4, Math.min(14, Math.round(total / 700)));
+  const n = Math.max(5, Math.min(12, Math.round(total / 800)));
   const out = [];
   for (let k = 1; k <= n; k++) out.push(pointAt(r.coords, cum, k * total / (n + 1)).ll);
   return out;
@@ -2199,7 +2200,7 @@ function drawHandles(){
   const color = PALETTE[edit.i % PALETTE.length];
   edit.vias.forEach((q, k) => {
     const m = L.marker(q, { draggable: !edit.busy, zIndexOffset: 2000, keyboard: false,
-      icon: L.divIcon({ className: "", html: `<div class="handle${edit.busy ? " busy" : ""}" style="--hc:${color}"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(map);
+      icon: L.divIcon({ className: "", html: `<div class="handle${edit.busy ? " busy" : ""}" style="--hc:${color}"></div>`, iconSize: [30, 30], iconAnchor: [15, 15] }) }).addTo(map);
     m.on("dragend", () => { const p = m.getLatLng(); pushUndo(); edit.vias[k] = [p.lat, p.lng]; reroute(); });
     m.on("click", (e) => {
       L.DomEvent.stopPropagation(e);
@@ -2209,6 +2210,22 @@ function drawHandles(){
     });
     edit.marks.push(m);
   });
+  // Zwischen je zwei Punkten ein kleiner Zusatzpunkt: ziehen = neuer Punkt an dieser Stelle,
+  // antippen = wird zum normalen Punkt. So lässt sich die Runde an jeder Stelle verschieben.
+  const r = results[edit.i];
+  if (!r || edit.busy) return;
+  const cum = r.cum || (r.cum = cumulative(r.coords)), total = cum[cum.length - 1];
+  const pos = [0, ...edit.vias.map(q => nearestOnRoute(r.coords, cum, q).pos), total];
+  for (let k = 0; k < pos.length - 1; k++){
+    const a = Math.min(pos[k], pos[k+1]), b = Math.max(pos[k], pos[k+1]);
+    if (b - a < 160) continue;
+    const ll = pointAt(r.coords, cum, (a + b) / 2).ll;
+    const g = L.marker(ll, { draggable: true, zIndexOffset: 1900, keyboard: false,
+      icon: L.divIcon({ className: "", html: `<div class="handle ghost" style="--hc:${color}"></div>`, iconSize: [24, 24], iconAnchor: [12, 12] }) }).addTo(map);
+    g.on("dragend", () => { const p = g.getLatLng(); pushUndo(); edit.vias.splice(k, 0, [p.lat, p.lng]); reroute(); });
+    g.on("click", (e) => { L.DomEvent.stopPropagation(e); if (edit.busy) return; pushUndo(); edit.vias.splice(k, 0, ll); drawHandles(); });
+    edit.marks.push(g);
+  }
 }
 function pushUndo(){
   edit.undo.push({ route: results[edit.i], vias: edit.vias.map(q => q.slice()) });
