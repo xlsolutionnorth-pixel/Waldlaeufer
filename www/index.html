@@ -1370,7 +1370,7 @@ function roundness(coords, total){
 // Stichweg oder neben dem Weg, läuft die Route hinein und auf demselben Weg wieder heraus.
 // Solche "Ausbuchtungen" (bis 1,2 km hin+zurück) werden hier herausgeschnitten; Abbiegehinweise,
 // Distanz und Wegarten-Anteile werden passend umgerechnet.
-const SPUR_MAX = 1200, SPUR_MIN = 40, SPUR_TINY_LOOP = 300;
+const SPUR_MAX = 1200, SPUR_MIN = 40, SPUR_TINY_LOOP = 300, SPUR_GAP = 25, SPUR_WIDTH = 30;
 function turnType(inB, outB){
   const d = ((outB - inB + 540) % 360) - 180, a = Math.abs(d);
   if (a < 25) return null;                       // geradeaus – kein Hinweis nötig
@@ -1403,6 +1403,15 @@ function pruneSpurs(feature){
     for (const p of pts) if (pts.some(q => Math.abs(q[2] - p[2]) > 30 && haversine(p, q) < 15)) doubled++;
     return doubled / pts.length >= 0.6;
   }
+  // Schmale "Zunge": hin auf einem Weg, zurück auf einem dicht daneben liegenden (z. B. beiderseits eines Feldes).
+  // Mittlere Breite = 2 × eingeschlossene Fläche / Länge.
+  function narrow(i, j, along){
+    const kx = Math.cos(C[i][1] * Math.PI / 180) * 111320, ky = 110540;
+    let a = 0;
+    for (let k = i + 1; k <= j; k++) a += (C[k-1][0] * kx) * (C[k][1] * ky) - (C[k][0] * kx) * (C[k-1][1] * ky);
+    a += (C[j][0] * kx) * (C[i][1] * ky) - (C[i][0] * kx) * (C[j][1] * ky);
+    return Math.abs(a) / along < SPUR_WIDTH / 2;
+  }
   function bearingAt(idx, dir){
     // Richtung über ~20 m vor (dir = -1) bzw. nach (dir = +1) dem Punkt
     let k = idx, d = 0;
@@ -1428,22 +1437,30 @@ function pruneSpurs(feature){
     Object.values(extras).forEach(e => { e.values = e.values.map(v => [m(v[0]), m(v[1]), v[2]]).filter(v => v[1] > v[0]); });
   }
 
+  let lastCut = -99;
   for (let i = 1, guard = 0; i < C.length - 2 && guard < 5000; i++, guard++){
     let along = 0, best = -1, bestAlong = 0;
     for (let j = i + 1; j < C.length - 1; j++){
       along += hv(C[j-1], C[j]);
       if (along > SPUR_MAX) break;
-      // Stichwege kehren zum selben Kartenpunkt (der Weggabelung) zurück – nur dann wird geschnitten,
-      // sonst entstünde eine Verbindung quer durchs Gelände
-      if (along >= SPUR_MIN && hv(C[i], C[j]) < 4){ best = j; bestAlong = along; }
+      if (along < SPUR_MIN) continue;
+      const gap = hv(C[i], C[j]);
+      if (gap >= SPUR_GAP) continue;
+      // Stichweg = kommt zum selben Punkt zurück (kleine Schleife oder hin und zurück auf demselben Weg),
+      // oder kommt bis auf wenige Meter zurück und war dabei nur eine schmale Zunge (zwei dicht nebeneinander
+      // liegende Wege). Geschnitten wird der längste solche Abschnitt.
+      const ok = (gap < 4 && (along <= SPUR_TINY_LOOP || outAndBack(i, j))) || outAndBack(i, j) || narrow(i, j, along);
+      if (ok){ best = j; bestAlong = along; }
     }
-    if (best < 0) continue;
-    if (bestAlong <= SPUR_TINY_LOOP || outAndBack(i, best)){
-      cut(i, best); removed++; removedM += bestAlong;
+    if (best >= 0){
+      cut(i, best); removedM += bestAlong;
+      if (i - lastCut > 3) removed++;            // erneutes Nachschneiden an derselben Stelle zählt nicht doppelt
+      lastCut = i;
       i = Math.max(0, i - 3);                    // Umgebung erneut prüfen (verschachtelte Stichwege)
     }
   }
-  if (!removed) return { feature, removed: 0, removedM: 0 };
+  if (!removedM) return { feature, removed: 0, removedM: 0 };
+  removed = Math.max(1, removed);
 
   // Distanz, Höhenmeter-Schätzung und Wegarten-Anteile neu berechnen
   const cumC = [0]; for (let k = 1; k < C.length; k++) cumC.push(cumC[k-1] + hv(C[k-1], C[k]));
@@ -1804,6 +1821,7 @@ function render(keepView){
         <span title="${r.clockwise ? "im Uhrzeigersinn" : "gegen den Uhrzeigersinn"}">${ic(r.clockwise ? "cw" : "ccw")}</span>
       </div>
       ${r.outside ? `<div class="hint">${ic("warn", "s")}${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km zur Wunschdistanz</div>` : ""}
+      ${r.overlap >= 0.03 || r.crossCount ? `<div class="hint" style="color:var(--c-main)">${ic("double", "s")}${r.overlap >= 0.03 ? `${Math.round(r.overlap * 100)} % doppelt` : ""}${r.overlap >= 0.03 && r.crossCount ? " · " : ""}${r.crossCount ? `${r.crossCount} Kreuzung${r.crossCount > 1 ? "en" : ""}` : ""} – „Bereinigen“ versuchen</div>` : ""}
       ${r.spursRemoved ? `<div class="hint">${ic("scissors", "s")}${r.spursRemoved === 1 ? "1 Stichweg" : r.spursRemoved + " Stichwege"} entfernt</div>` : ""}
       ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
