@@ -15,7 +15,7 @@ Rechtliche und steuerliche Punkte ersetzen keine Beratung durch Fachleute.
 |---|---|
 | Ziel-Android-Version | Capacitor 8.6 → Android 16 (API 36), wie von Google für neue Apps verlangt |
 | Akku-Optimierung | Store-konform: öffnet die Android-Einstellungsseite statt des direkten Dialogs; Berechtigung `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` entfernt |
-| Werbung (AdMob) | eingebaut, **nur Google-Test-Werbung**: Einwilligungsfenster (UMP/TCF), Banner unten, Vollbild nach jeder 3. Suche, keine Werbung während der Navigation, Knopf „Datenschutz-Einstellungen (Werbung)“ unter ⚙️ |
+| Werbung (AdMob) | eingebaut, **nur Google-Test-Werbung**: Einwilligungsfenster (UMP/TCF), Banner unten, Vollbild vor dem Start einer Runde und nach jeder 3. Suche (höchstens alle 3 Minuten), Banner verschwindet bei offenen Fenstern, keine Werbung während der Navigation, Knopf „Datenschutz-Einstellungen (Werbung)“ unter ⚙️ |
 | AdMob-App-ID | wird beim Bauen aus der GitHub-Variable `ADMOB_APP_ID` gelesen; fehlt sie, wird Googles Test-ID verwendet |
 | Vermittlungs-Server | Cloudflare Worker im Ordner `server/` gebaut und getestet; Einrichtung siehe B3. Die App nutzt ihn automatisch, sobald seine Adresse in `www/config.js` steht |
 | Test-APKs | jeder Bau auf einem Testzweig erscheint als „Pre-release“ unter Releases (der feste Download-Link der Alltags-App bleibt unberührt) |

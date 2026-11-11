@@ -84,7 +84,8 @@ h1{font-size:19px;margin:2px 0 2px;letter-spacing:-.01em}
 .actions button{flex:1;border:1px solid var(--line);background:transparent;color:var(--ink);border-radius:10px;padding:10px 6px;font-size:14px;cursor:pointer}
 .actions button.primary{background:var(--forest);color:#fff;border-color:var(--forest)}
 .modal{position:fixed;inset:0;z-index:2000;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center}
-.modal .box{background:var(--panel);width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom))}
+.modal{padding-bottom:var(--ad-h,0px)}
+.modal .box{background:var(--panel);width:100%;max-width:520px;max-height:calc(100% - 20px);overflow-y:auto;border-radius:20px 20px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom))}
 .modal h2{margin:0 0 6px;font-size:18px}
 .modal p{font-size:14px;color:var(--muted);line-height:1.45;margin:6px 0 12px}
 .modal input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink);font-size:15px}
@@ -1441,7 +1442,7 @@ function render(){
       </div>`;
     c.onclick = (e) => {
       const a = e.target.closest("button") && e.target.closest("button").dataset.a;
-      if (a === "run") return startNav(r);
+      if (a === "run") return startNavWithAd(r);
       if (a === "gmaps") return openGoogle(r);
       if (a === "save"){ toggleSave(r); e.target.textContent = isSaved(r) ? "★ Gespeichert" : "☆ Speichern"; return; }
       if (a === "rev"){
@@ -1725,41 +1726,79 @@ const ADS = {
   testing: true,
   banner: "ca-app-pub-3940256099942544/9214589741",        // Google-Test-ID (adaptives Banner)
   interstitial: "ca-app-pub-3940256099942544/1033173712",  // Google-Test-ID (Vollbild)
-  interstitialEvery: 3                                      // Vollbild nach jeder 3. erfolgreichen Suche
+  interstitialEvery: 3,                                     // Vollbild nach jeder 3. erfolgreichen Suche
+  beforeRun: true,                                          // Vollbild, bevor die Navigation startet
+  minGapMs: 3 * 60 * 1000                                   // höchstens ein Vollbild alle 3 Minuten
 };
-const ads = { ready: false, wantBanner: true, bannerOn: false, bannerH: 0, interReady: false, privacy: false, status: "" };
+const ads = { ready: false, wantBanner: true, bannerOn: false, bannerH: 0, interReady: false, privacy: false, status: "",
+              modalOpen: false, lastInter: 0, onDismiss: null, busy: Promise.resolve() };
 
 function applyAdInset(){
   document.documentElement.style.setProperty("--ad-h", (ads.bannerOn ? ads.bannerH : 0) + "px");
   setTimeout(() => map.invalidateSize(), 300);
 }
-async function adBanner(on){
-  const A = plug("AdMob"); ads.wantBanner = on;
-  if (!A || !ads.ready) return;
-  try {
-    if (on && !ads.bannerOn){
-      await A.showBanner({ adId: ADS.banner, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 0, isTesting: ADS.testing });
-      ads.bannerOn = true;
-    } else if (!on && ads.bannerOn){
-      await A.removeBanner(); ads.bannerOn = false;
-    }
-  } catch(e){ ads.bannerOn = false; }
-  applyAdInset();
+// Banner nur, wenn gewünscht, keine Navigation läuft und kein Fenster (Einstellungen, Akku …) offen ist –
+// sonst würde das Banner die Knöpfe unten im Fenster verdecken.
+function adBanner(on){ ads.wantBanner = on; return syncBanner(); }
+function syncBanner(){
+  ads.busy = ads.busy.then(async () => {
+    const A = plug("AdMob"); if (!A || !ads.ready) return;
+    const want = ads.wantBanner && !ads.modalOpen && !nav.active;
+    try {
+      if (want && !ads.bannerOn){
+        await A.showBanner({ adId: ADS.banner, adSize: "ADAPTIVE_BANNER", position: "BOTTOM_CENTER", margin: 0, isTesting: ADS.testing });
+        ads.bannerOn = true;
+        if (!ads.bannerH) ads.bannerH = 60;   // Notwert, bis die echte Höhe gemeldet wird
+      } else if (!want && ads.bannerOn){
+        await A.removeBanner(); ads.bannerOn = false;
+      }
+    } catch(e){ ads.bannerOn = false; }
+    applyAdInset();
+  }).catch(() => {});
+  return ads.busy;
+}
+{ // offene Fenster beobachten
+  const anyModal = () => [...document.querySelectorAll(".modal")].some(m => getComputedStyle(m).display !== "none");
+  const mo = new MutationObserver(() => { const o = anyModal(); if (o !== ads.modalOpen){ ads.modalOpen = o; syncBanner(); } });
+  document.querySelectorAll(".modal").forEach(m => mo.observe(m, { attributes: true, attributeFilter: ["style", "class"] }));
 }
 async function prepInterstitial(){
   const A = plug("AdMob"); if (!A || !ads.ready || ads.interReady) return;
   try { await A.prepareInterstitial({ adId: ADS.interstitial, isTesting: ADS.testing }); ads.interReady = true; } catch(e){ ads.interReady = false; }
+}
+// Vollbild zeigen und warten, bis es geschlossen ist (höchstens 60 s). true = wurde gezeigt.
+async function showInter(){
+  const A = plug("AdMob");
+  if (!A || !ads.ready || !ads.interReady || ads.modalOpen) return false;
+  if (Date.now() - ads.lastInter < ADS.minGapMs) return false;
+  ads.interReady = false;
+  let done; const closed = new Promise(res => { done = res; });
+  ads.onDismiss = done;
+  const timer = setTimeout(done, 60000);
+  try { await A.showInterstitial(); }
+  catch(e){ clearTimeout(timer); ads.onDismiss = null; prepInterstitial(); return false; }
+  ads.lastInter = Date.now();
+  await closed; clearTimeout(timer); ads.onDismiss = null;
+  prepInterstitial();
+  return true;
 }
 async function adAfterSearch(){
   const A = plug("AdMob"); if (!A || !ads.ready || nav.active) return;
   const n = Number(store.get("adSearches", "0")) + 1; store.set("adSearches", String(n));
   if (n % ADS.interstitialEvery !== 0 || !ads.interReady) return;
   // kurz warten, damit man die gefundenen Runden zuerst sieht
-  setTimeout(async () => {
-    if (nav.active) return;
-    try { ads.interReady = false; await A.showInterstitial(); } catch(e){}
-    prepInterstitial();
-  }, 1200);
+  setTimeout(() => { if (!nav.active) showInter(); }, 1200);
+}
+// Vor dem Start der Navigation: Vollbild-Werbung, danach geht es direkt los
+let navStarting = false;
+async function startNavWithAd(r){
+  if (navStarting || nav.active) return startNav(r);
+  navStarting = true;
+  try {
+    if (ADS.enabled && ADS.beforeRun && await showInter()) await sleep(300);
+  } catch(e){}
+  navStarting = false;
+  return startNav(r);
 }
 async function initAds(){
   const A = plug("AdMob"); if (!ADS.enabled || !A) return;
@@ -1778,10 +1817,12 @@ async function initAds(){
   ads.ready = true;
   try {
     A.addListener("bannerAdSizeChanged", info => { ads.bannerH = Math.round((info && info.height) || 0); applyAdInset(); });
-    A.addListener("interstitialAdDismissed", () => { ads.interReady = false; prepInterstitial(); });
+    A.addListener("interstitialAdDismissed", () => { ads.interReady = false; if (ads.onDismiss) ads.onDismiss(); else prepInterstitial(); });
+    A.addListener("interstitialAdFailedToShow", () => { ads.interReady = false; if (ads.onDismiss) ads.onDismiss(); });
+    A.addListener("interstitialAdFailedToLoad", () => { ads.interReady = false; setTimeout(prepInterstitial, 30000); });
   } catch(e){}
   $("adPrivacy").style.display = "block";
-  if (ads.wantBanner && !nav.active) adBanner(true);
+  syncBanner();
   prepInterstitial();
 }
 $("adPrivacy").onclick = async () => {
