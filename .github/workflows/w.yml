@@ -1,0 +1,10 @@
+name: Werkzeug
+on: { push: { branches: [werkzeug] } }
+jobs:
+  get:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          npm pack leaflet@1.9.4 >/dev/null 2>&1 && tar -xzf leaflet-1.9.4.tgz
+          tar -czf l.tgz -C package/dist leaflet.js leaflet.css
+          echo "BEGIN64"; base64 -w0 l.tgz; echo; echo "END64"
