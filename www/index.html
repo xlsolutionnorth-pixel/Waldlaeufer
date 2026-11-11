@@ -167,6 +167,8 @@ button{font-family:inherit}
 .actions button.primary{flex:1;width:auto;border-radius:22px;background:var(--accent);color:var(--on-accent);border-color:var(--accent);display:flex;justify-content:center;gap:8px;font-size:15px;font-weight:600}
 .actions button.primary .i{fill:currentColor;stroke-width:1.5}
 .actions button.on{color:var(--accent);border-color:var(--accent)}
+.actions button.txt{width:auto;border-radius:22px;padding:0 14px 0 11px;display:flex;gap:6px;font-size:14px;font-weight:500}
+.actions button.txt .i{width:18px;height:18px}
 .actions button.on .i{fill:currentColor}
 
 /* ---------- Fenster ---------- */
@@ -225,7 +227,7 @@ body.navigating .topbar,body.navigating #suggest,body.navigating #layerBtn{displ
 .modebar button:disabled{opacity:.4}
 body.editing .topbar,body.drawing .topbar,body.editing #suggest,body.drawing #suggest{display:none}
 body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!important}
-.handle{width:22px;height:22px;border-radius:50%;background:#fff;border:4px solid var(--hc,#2c9a5a);box-shadow:0 1px 6px rgba(0,0,0,.45)}
+.handle{margin:9px;width:18px;height:18px;border-radius:50%;background:#fff;border:4px solid var(--hc,#2c9a5a);box-shadow:0 1px 6px rgba(0,0,0,.45)}
 .handle.busy{opacity:.5}
 .leaflet-marker-draggable .handle{cursor:grab}
 #busy{position:absolute;z-index:1160;left:50%;top:calc(env(safe-area-inset-top) + 76px);transform:translateX(-50%);background:var(--panel);color:var(--ink);
@@ -1679,7 +1681,7 @@ function sortResults(){
   const rec = r => r.score - Math.abs(r.dev || 0) * 6;
   if (sortMode === "up") results.sort((a, b) => (a.ascent - b.ascent) || (rec(b) - rec(a)));
   else if (sortMode === "down") results.sort((a, b) => (b.ascent - a.ascent) || (rec(b) - rec(a)));
-  else if (sortMode === "near") results.sort((a, b) => (a.sketchDev ?? 1e9) - (b.sketchDev ?? 1e9));
+  else if (sortMode === "near") results.sort((a, b) => drawnKey(a) - drawnKey(b));
   else results.sort((a, b) => rec(b) - rec(a));
   if (selId) selected = results.findIndex(r => r.id === selId);
   const drawnSet = results.some(r => r.drawn);
@@ -1739,7 +1741,7 @@ function render(keepView){
       ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
         <button class="primary" data-a="run">${ic("play")}Start</button>
-        <button data-a="edit" title="Punkte verschieben" aria-label="Bearbeiten">${ic("edit")}</button>
+        <button data-a="edit" class="txt" title="Punkte verschieben" aria-label="Anpassen">${ic("edit")}Anpassen</button>
         <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
         <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
       </div>`;
@@ -2069,6 +2071,9 @@ function sketchFit(r, sk){
   return { dev: (s1 / sk.length + s2 / rs.length) / 2, cover: cov / sk.length };
 }
 
+// Güte einer gezeichneten Runde (kleiner = besser): nah an der Skizze, ohne Kreuzungen und doppelte Stücke
+function drawnKey(r){ return (r.sketchDev ?? 500) + (r.crossCount || 0) * 35 + (r.overlap || 0) * 300; }
+
 /* ---------- Punkte der Route verschieben ---------- */
 // Die Runde bekommt ziehbare Punkte. Wird einer verschoben, berechnet der Routendienst die Runde
 // neu über alle Punkte – auf echten Wegen, wieder mit Vorliebe für Wald- und Feldwege.
@@ -2107,7 +2112,7 @@ function drawHandles(){
   const color = PALETTE[edit.i % PALETTE.length];
   edit.vias.forEach((q, k) => {
     const m = L.marker(q, { draggable: !edit.busy, zIndexOffset: 2000, keyboard: false,
-      icon: L.divIcon({ className: "", html: `<div class="handle${edit.busy ? " busy" : ""}" style="--hc:${color}"></div>`, iconSize: [30, 30], iconAnchor: [15, 15] }) }).addTo(map);
+      icon: L.divIcon({ className: "", html: `<div class="handle${edit.busy ? " busy" : ""}" style="--hc:${color}"></div>`, iconSize: [36, 36], iconAnchor: [18, 18] }) }).addTo(map);
     m.on("dragend", () => { const p = m.getLatLng(); pushUndo(); edit.vias[k] = [p.lat, p.lng]; reroute(); });
     m.on("click", (e) => {
       L.DomEvent.stopPropagation(e);
@@ -2226,6 +2231,7 @@ function finishDraw(){
   const pts = draw.pts.slice();
   let len = 0; for (let k = 1; k < pts.length; k++) len += haversine(pts[k-1], pts[k]);
   if (pts.length < 3 || len < 400){ toast("Bitte eine längere Strecke zeichnen"); return; }
+  if (len > 60000){ toast("Zu lang – bitte näher heranzoomen und neu zeichnen"); drawUndo(); return; }
   endDraw();
   sketchSearch(pts);
 }
@@ -2256,17 +2262,18 @@ async function sketchSearch(pts){
     { sp: Math.max(300, len / 12), nature: false, rad: 200, profile: "foot-walking", label: "Alle Wege" }
   ];
   const found = []; let done = 0, lastErr = "", stop = false;
-  const TOTAL = variants.length + 2;
-  const keep = list => list.slice().sort((a, b) => a.sketchDev - b.sketchDev).slice(0, 4);
-  const tryRoute = async (idx, v, label) => {
-    done++; setProgress(done / TOTAL); status(`${label} · ${done}/${TOTAL}`);
+  const TOTAL = variants.length + 5;
+  const keep = list => list.slice().sort((a, b) => drawnKey(a) - drawnKey(b)).slice(0, 4);
+  // pts: Zwischenpunkte [[lat,lng],…]; vk: zugehörige Indizes in der Skizze (für das Verfeinern)
+  const tryPts = async (pts, vk, v, label) => {
+    done++; setProgress(Math.min(1, done / TOTAL)); status(`${label} · ${done}`);
     try {
-      const r = await buildViaRoute([S, ...idx.map(k => sk[k]), S], v.profile, v.nature, v.rad);
+      const r = await buildViaRoute([S, ...pts, S], v.profile, v.nature, v.rad);
       const q = sketchFit(r, sk);
-      Object.assign(r, { drawn: true, sketchDev: q.dev, sketchCover: q.cover, _vk: idx, _v: v });
-      r.score = r.score * 0.3 + q.cover * 50 - q.dev * 0.5;
+      Object.assign(r, { drawn: true, sketchDev: q.dev, sketchCover: q.cover, _vk: vk, _v: v });
+      r.score = r.score * 0.3 + q.cover * 50 - q.dev * 0.5 - r.crossCount * 15 - r.overlap * 150;
       const dup = found.findIndex(o => isDuplicate(o, r));
-      if (dup >= 0){ if (found[dup].sketchDev > r.sketchDev) found[dup] = r; }
+      if (dup >= 0){ if (drawnKey(found[dup]) > drawnKey(r)) found[dup] = r; }
       else found.push(r);
       results = keep(found); sortMode = "near"; render();
       return r;
@@ -2276,6 +2283,8 @@ async function sketchSearch(pts){
       return null;
     } finally { await sleep(REQ_GAP_MS); }
   };
+  const tryRoute = (idx, v, label) => tryPts(idx.map(k => sk[k]), idx, v, label);
+  const bestOf = () => found.slice().sort((a, b) => drawnKey(a) - drawnKey(b))[0];
   try {
     for (const v of variants){ if (stop) break; await tryRoute(pick(v.sp), v, v.label); }
     // Verfeinern: wo die beste Variante mehr als 90 m von der Skizze abweicht, zusätzliche Zwischenpunkte setzen
@@ -2291,11 +2300,28 @@ async function sketchSearch(pts){
       const r = await tryRoute(idx, Object.assign({}, best._v, { rad: Math.min(best._v.rad, 150) }), "Verfeinere");
       if (!r || r.sketchDev >= best.sketchDev - 3) break;
     }
+    // Aufräumen: Zwischenpunkte, die doppelte Abschnitte oder Kreuzungen verursachen, weglassen
+    for (let it = 0; it < 3 && !stop; it++){
+      const best = bestOf(); if (!best) break;
+      if (best.crossCount === 0 && best.overlap < 0.02) break;
+      const cum = best.cum || (best.cum = cumulative(best.coords));
+      const vias = best.vias || [], bad = new Set();
+      vias.forEach((v, k) => {
+        const pos = nearestOnRoute(best.coords, cum, v).pos;
+        if ((best.doubledRanges || []).some(x => pos >= x[0] - 80 && pos <= x[1] + 80)) bad.add(k);
+        if ((best.crossPts || []).some(c => fastD(c, v) < 250)) bad.add(k);
+      });
+      if (!bad.size || bad.size >= vias.length) break;
+      const keepIdx = vias.map((v, k) => k).filter(k => !bad.has(k));
+      const r = await tryPts(keepIdx.map(k => vias[k]), best._vk, best._v, "Räume auf");
+      if (!r || drawnKey(r) >= drawnKey(best) - 5) break;
+    }
     if (!found.length){ status("Keine Runde entlang der Skizze gefunden" + (lastErr ? ": " + lastErr : "")); return; }
     results = keep(found); sortMode = "near"; selected = -1; render(); select(0);
     addHistory(Math.round(results[0].distKm * 2) / 2, true);
     status(`${results.length} Variante${results.length === 1 ? "" : "n"} nach deiner Skizze`);
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
+  if (results.length && !nav.active){ startEdit(0); toast("Punkte ziehen zum Anpassen · ✓ wenn fertig"); }
 }
 
 /* ---------- Helfer ---------- */
