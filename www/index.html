@@ -239,6 +239,14 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
 .spin{width:16px;height:16px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--accent);animation:sp 0.8s linear infinite}
 @keyframes sp{to{transform:rotate(360deg)}}
 
+#cam{position:fixed;inset:0;z-index:2500;background:#000;display:none}
+#cam video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+#cam .bar{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 28px);display:flex;justify-content:space-around;align-items:center}
+#cam .bar button{width:56px;height:56px;border-radius:50%;border:0;background:rgba(255,255,255,.2);color:#fff;display:grid;place-items:center}
+#cam .bar #camShot{width:78px;height:78px;background:#fff;border:5px solid rgba(255,255,255,.45);background-clip:padding-box}
+#shotImg{width:100%;border-radius:16px;display:block;margin-top:10px;box-shadow:0 4px 18px rgba(0,0,0,.25)}
+#shotModal .box{padding-top:14px}
+#runStats{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:15px;color:var(--ink);margin:8px 0 4px}
 #toast{position:fixed;z-index:3000;left:50%;bottom:calc(var(--sheet-h,46vh) + 16px);transform:translateX(-50%);background:#202622;color:#fff;
   padding:10px 16px;border-radius:14px;font-size:14px;box-shadow:0 4px 16px rgba(0,0,0,.3);max-width:88vw;text-align:center;opacity:0;pointer-events:none;transition:opacity .25s}
 #toast.show{opacity:1}
@@ -297,6 +305,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
   <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6.5" r="2.8"/><circle cx="6" cy="17.5" r="2.8"/><path d="M8.3 8.2 20 18M8.3 15.8 20 6"/></symbol>
   <symbol id="i-place" viewBox="0 0 24 24"><path d="M12 21.5s7-7 7-12.5a7 7 0 0 0-14 0c0 5.5 7 12.5 7 12.5z"/><path d="M12 6.3l.9 1.9 2 .3-1.5 1.4.4 2-1.8-1-1.8 1 .4-2-1.5-1.4 2-.3z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-gesture" viewBox="0 0 24 24"><path d="M3 18c2.5-4 4.5-7 6.5-7 2.3 0 .8 6 3.3 6 2.2 0 2.7-6 5-6 1.2 0 1.8 1.2 2.7 2.5"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3.5 8.5a2 2 0 0 1 2-2h2.3l1.7-2.5h5l1.7 2.5h2.3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".7" fill="currentColor"/></symbol>
 </svg>
 <div id="map"></div>
@@ -393,6 +402,45 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
     <div class="btns"><button class="primary" id="paceOk">Fertig</button></div>
   </div>
 </div>
+
+<div class="modal" id="runModal">
+  <div class="box">
+    <h2><svg class="i"><use href="#i-flag"/></svg>Runde geschafft!</h2>
+    <div id="runStats"></div>
+    <p>Ein Erinnerungsbild mit deiner Strecke machen?</p>
+    <button class="wide" id="runPhoto" style="background:var(--accent);color:var(--on-accent);border-color:var(--accent);height:50px;font-size:15.5px;font-weight:600"><svg class="i" style="color:inherit"><use href="#i-camera"/></svg>Foto machen</button>
+    <div class="btns" style="margin-top:8px">
+      <button id="runSkip">Nein danke</button>
+      <button id="runNoPhoto">Ohne Foto</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="shotModal">
+  <div class="box">
+    <div class="seg" id="shotLayout">
+      <label><input type="radio" name="lay" value="on">Strecke auf dem Foto</label>
+      <label><input type="radio" name="lay" value="below">Strecke darunter</label>
+    </div>
+    <img id="shotImg" alt="Laufbild">
+    <div class="btns">
+      <button id="shotRetake" aria-label="Neues Foto"><svg class="i s"><use href="#i-camera"/></svg></button>
+      <button id="shotSave">Speichern</button>
+      <button class="primary" id="shotShare">Teilen</button>
+    </div>
+    <button class="wide" id="shotClose" style="border:0;margin-top:6px">Schließen</button>
+  </div>
+</div>
+
+<div id="cam">
+  <video id="camVideo" playsinline muted autoplay></video>
+  <div class="bar">
+    <button id="camClose" aria-label="Abbrechen"><svg class="i"><use href="#i-close"/></svg></button>
+    <button id="camShot" aria-label="Auslösen"></button>
+    <button id="camFlip" aria-label="Kamera wechseln"><svg class="i"><use href="#i-swap"/></svg></button>
+  </div>
+</div>
+<input type="file" id="camFile" accept="image/*" capture="user" style="display:none">
 
 <div class="modal" id="keyModal">
   <div class="box">
@@ -689,7 +737,7 @@ async function startNav(r){
   if (nav.active) stopNav(true);
   if (!r.steps || !r.steps.length){ status("Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen."); return; }
   Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0,
-    ran:0, anchor:null, hAnchor:null, heading:null, leavePos:null, leaveRan:0, saved:0, offGuide:0 });
+    ran:0, track:[], t0:0, photoAsked:false, anchor:null, hAnchor:null, heading:null, leavePos:null, leaveRan:0, saved:0, offGuide:0 });
   document.body.classList.add("navigating");
   $("nav").style.display = "block"; $("nav").classList.remove("off");
   $("navMute").innerHTML = ic(nav.muted ? "mute" : "volume");
@@ -761,7 +809,8 @@ function updateNav(p){
   // Tatsächlich gelaufene Strecke aus der GPS-Spur (kleines Zittern im Stand wird ignoriert)
   if (!nav.anchor) nav.anchor = p;
   const step = haversine(nav.anchor, p);
-  if (step >= 8 && step < 300){ nav.ran += step; nav.anchor = p; }
+  if (!nav.t0) nav.t0 = Date.now();
+  if (step >= 8 && step < 300){ nav.ran += step; nav.anchor = p; nav.track.push(p); }
   else if (step >= 300) nav.anchor = p;                    // GPS-Sprung: nicht mitzählen
   // Laufrichtung (aus den letzten ~20 m)
   if (!nav.hAnchor) nav.hAnchor = p;
@@ -827,6 +876,7 @@ function updateNav(p){
     $("navInfo").textContent = `${ranKm} km gelaufen${extra}`;
     if (!nav.spoken.goal && remaining < 40){
       nav.spoken.goal = true;
+      if (!nav.photoAsked){ nav.photoAsked = true; const run = snapshotRun(); setTimeout(() => offerPhoto(run), 2500); }
       const extraSpoken = diff > 300 ? `, ${fmt(diff / 1000)} Kilometer abgekürzt` : diff < -300 ? `, davon ${fmt(-diff / 1000)} Kilometer Umweg` : "";
       speak(`Ziel erreicht. Du bist ${ranKm} Kilometer gelaufen${extraSpoken}. Stark!`);
       vibrate([200, 100, 200, 100, 400]);
@@ -854,6 +904,8 @@ function updateNav(p){
 }
 
 function stopNav(silent){
+  // Navigation beendet, aber das meiste gelaufen → auch dann ein Erinnerungsbild anbieten
+  if (nav.active && !silent && !nav.photoAsked && nav.cum && nav.ran >= 0.6 * nav.cum[nav.cum.length - 1]){ nav.photoAsked = true; const run = snapshotRun(); setTimeout(() => offerPhoto(run), 600); }
   const P = geoPlugin(), BG = plug("BackgroundGeolocation");
   if (nav.watch !== null && nav.watch !== undefined){
     try {
@@ -1750,6 +1802,7 @@ function render(keepView){
       ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
         <button class="primary" data-a="run">${ic("play")}Start</button>
+        <button data-a="edit" class="txt" title="Punkte verschieben" aria-label="Anpassen">${ic("edit")}Anpassen</button>
         <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
         <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
       </div>`;
@@ -2329,7 +2382,168 @@ async function sketchSearch(pts){
     addHistory(Math.round(results[0].distKm * 2) / 2, true);
     status(`${results.length} Variante${results.length === 1 ? "" : "n"} nach deiner Skizze`);
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
+  if (results.length && !nav.active){ startEdit(0); toast("Punkte ziehen zum Anpassen · ✓ wenn fertig"); }
 }
+
+/* ---------- Erinnerungsbild nach dem Lauf ---------- */
+// Nach der Runde: Frage "Foto machen?" → Frontkamera → Bild mit gelaufener Strecke, Distanz, Zeit und Ort.
+let lastRun = null, shot = { photo: null, layout: "on" };
+function snapshotRun(){
+  const r = nav.route; if (!r) return null;
+  const total = nav.cum ? nav.cum[nav.cum.length - 1] : 0;
+  const track = nav.track && nav.track.length >= 10 ? nav.track.slice() : r.coords.slice();
+  const dist = nav.ran > 200 ? nav.ran : total;
+  const secs = nav.t0 ? Math.max(60, (Date.now() - nav.t0) / 1000) : flatEquivalent(r) / 1000 * paceMid();
+  return { track, dist, secs, label: startLabel && startLabel !== "Mein Standort" ? startLabel.split(",")[0] : "", date: new Date() };
+}
+function offerPhoto(run){
+  if (!run || $("runModal").style.display === "flex") return;
+  lastRun = run;
+  const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
+  $("runStats").innerHTML = `${ic("flag", "s")} ${fmt(run.dist / 1000)} km &nbsp; ${ic("timer", "s")} ${m}:${String(sec).padStart(2, "0")} min &nbsp; ${fmtPace(run.secs / (run.dist / 1000))} /km`;
+  $("runModal").style.display = "flex";
+}
+$("runPhoto").onclick = () => { $("runModal").style.display = "none"; openCamera(); };
+$("runNoPhoto").onclick = () => { $("runModal").style.display = "none"; shot.photo = null; showShot(); };
+$("runSkip").onclick = () => { $("runModal").style.display = "none"; };
+
+// Kamera im App-Fenster (Frontkamera); falls nicht möglich: Kamera-App des Handys
+let camStream = null, camFacing = "user";
+async function openCamera(){
+  if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return pickPhoto();
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: camFacing, width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false });
+  } catch(e){ toast("Kamera nicht verfügbar – Berechtigung prüfen"); return pickPhoto(); }
+  const v = $("camVideo"); v.srcObject = camStream; v.style.transform = camFacing === "user" ? "scaleX(-1)" : "none";
+  $("cam").style.display = "block";
+  try { await v.play(); } catch(e){}
+}
+function closeCamera(){
+  if (camStream) camStream.getTracks().forEach(t => t.stop());
+  camStream = null; $("cam").style.display = "none"; $("camVideo").srcObject = null;
+}
+$("camClose").onclick = closeCamera;
+$("camFlip").onclick = async () => { camFacing = camFacing === "user" ? "environment" : "user"; closeCamera(); openCamera(); };
+$("camShot").onclick = () => {
+  const v = $("camVideo"); if (!v.videoWidth) return;
+  const c = document.createElement("canvas"); c.width = v.videoWidth; c.height = v.videoHeight;
+  const g = c.getContext("2d");
+  if (camFacing === "user"){ g.translate(c.width, 0); g.scale(-1, 1); }   // wie im Spiegel – so, wie man sich gesehen hat
+  g.drawImage(v, 0, 0);
+  closeCamera(); shot.photo = c; showShot();
+};
+function pickPhoto(){
+  const inp = $("camFile"); inp.value = "";
+  inp.onchange = () => {
+    const f = inp.files && inp.files[0]; if (!f) return;
+    const img = new Image(); img.onload = () => { shot.photo = img; showShot(); }; img.src = URL.createObjectURL(f);
+  };
+  inp.click();
+}
+
+function renderShot(run, photo, layout){
+  const W = 1080, H = 1350, c = document.createElement("canvas"); c.width = W; c.height = H;
+  const g = c.getContext("2d"), acc = accentColor();
+  const cover = (img, x, y, w, h) => {
+    const iw = img.videoWidth || img.naturalWidth || img.width, ih = img.videoHeight || img.naturalHeight || img.height;
+    const s = Math.max(w / iw, h / ih), sw = w / s, sh = h / s;
+    g.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, w, h);
+  };
+  const route = (bx, by, bw, bh, width) => {
+    const T = run.track, kx = Math.cos(T[0][0] * Math.PI / 180);
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    T.forEach(p => { const x = p[1] * kx, y = p[0]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); });
+    const s = Math.min(bw / ((x1 - x0) || 1e-9), bh / ((y1 - y0) || 1e-9));
+    const ox = bx + (bw - (x1 - x0) * s) / 2, oy = by + (bh - (y1 - y0) * s) / 2;
+    const P = p => [ox + (p[1] * kx - x0) * s, oy + (y1 - p[0]) * s];
+    const path = () => { g.beginPath(); T.forEach((p, i) => { const q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); };
+    g.save(); g.lineJoin = g.lineCap = "round";
+    g.shadowColor = "rgba(0,0,0,.55)"; g.shadowBlur = 18;
+    path(); g.strokeStyle = "rgba(255,255,255,.85)"; g.lineWidth = width + 8; g.stroke();
+    g.shadowBlur = 0; path(); g.strokeStyle = acc; g.globalAlpha = .95; g.lineWidth = width; g.stroke();
+    g.globalAlpha = 1; const st = P(T[0]);
+    g.beginPath(); g.arc(st[0], st[1], width * 1.3, 0, 7); g.fillStyle = "#fff"; g.fill(); g.lineWidth = 5; g.strokeStyle = acc; g.stroke();
+    g.restore();
+  };
+  const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
+  const hours = m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
+  const stats = [[fmt(run.dist / 1000), " km", 104], [hours, m >= 60 ? " h" : " min", 58], [fmtPace(run.secs / (run.dist / 1000)), " /km", 44]];
+  const where = [run.label, run.date.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" })].filter(Boolean).join(" · ");
+  const text = (t, x, y, size, weight, align, alpha) => {
+    g.save(); g.font = `${weight} ${size}px Roboto, "Google Sans", system-ui, sans-serif`; g.textAlign = align; g.fillStyle = `rgba(255,255,255,${alpha ?? 1})`;
+    g.shadowColor = "rgba(0,0,0,.5)"; g.shadowBlur = 10; g.fillText(t, x, y); g.restore();
+  };
+  const statBlock = (xRight, yBottom) => {
+    let y = yBottom;
+    for (let k = stats.length - 1; k >= 0; k--){
+      const [v, u, sz] = stats[k];
+      g.save(); g.font = `500 ${Math.round(sz * .45)}px Roboto, sans-serif`; const uw = g.measureText(u).width; g.restore();
+      text(u, xRight, y, Math.round(sz * .45), 500, "right", .85);
+      text(v, xRight - uw - 4, y, sz, 700, "right");
+      y -= sz * 1.12;
+    }
+  };
+  if (photo && layout === "below"){
+    cover(photo, 0, 0, W, 860);
+    const gr = g.createLinearGradient(0, 860, 0, H); gr.addColorStop(0, "#162019"); gr.addColorStop(1, "#0b100d");
+    g.fillStyle = gr; g.fillRect(0, 860, W, H - 860);
+    g.fillStyle = acc; g.fillRect(0, 856, W, 8);
+    route(60, 910, 470, 330, 9);
+    statBlock(1020, 1190);
+    text(where, 60, 1305, 32, 500, "left", .8);
+  } else if (photo){
+    cover(photo, 0, 0, W, H);
+    let gr = g.createLinearGradient(0, H * .5, 0, H); gr.addColorStop(0, "rgba(0,0,0,0)"); gr.addColorStop(1, "rgba(0,0,0,.78)");
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    gr = g.createLinearGradient(0, 0, 0, 180); gr.addColorStop(0, "rgba(0,0,0,.35)"); gr.addColorStop(1, "rgba(0,0,0,0)");
+    g.fillStyle = gr; g.fillRect(0, 0, W, 180);
+    g.globalAlpha = .9; route(56, 820, 470, 400, 9); g.globalAlpha = 1;
+    statBlock(1020, 1190);
+    text(where, 60, 1300, 32, 500, "left", .85);
+  } else {
+    const gr = g.createLinearGradient(0, 0, W, H); gr.addColorStop(0, acc); gr.addColorStop(1, "#0b100d");
+    g.fillStyle = gr; g.fillRect(0, 0, W, H);
+    route(110, 170, 860, 760, 12);
+    statBlock(1020, 1190);
+    text(where, 60, 1300, 32, 500, "left", .85);
+  }
+  text("WALDLÄUFER", 56, 92, 30, 700, "left", .92);
+  return c;
+}
+function showShot(){
+  if (!lastRun) return;
+  const c = renderShot(lastRun, shot.photo, shot.layout);
+  shot.url = c.toDataURL("image/jpeg", 0.9);
+  $("shotImg").src = shot.url;
+  document.querySelectorAll("#shotLayout input").forEach(el => { el.checked = el.value === shot.layout; el.disabled = !shot.photo; });
+  $("shotLayout").style.display = shot.photo ? "flex" : "none";
+  $("shotModal").style.display = "flex";
+}
+document.querySelectorAll("#shotLayout input").forEach(el => el.onchange = () => { shot.layout = el.value; showShot(); });
+$("shotClose").onclick = () => { $("shotModal").style.display = "none"; };
+$("shotRetake").onclick = () => { $("shotModal").style.display = "none"; openCamera(); };
+async function shotFile(dir, path){
+  const FS = plug("Filesystem");
+  if (!FS) return null;
+  const r = await FS.writeFile({ path, data: shot.url.split(",")[1], directory: dir, recursive: true });
+  return r && r.uri;
+}
+const shotName = () => `waldlaeufer-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.jpg`;
+$("shotShare").onclick = async () => {
+  const S = plug("Share");
+  try {
+    if (S){ const uri = await shotFile("CACHE", shotName()); await S.share({ title: "Meine Laufrunde", files: [uri] }); return; }
+    const blob = await (await fetch(shot.url)).blob(), file = new File([blob], shotName(), { type: "image/jpeg" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: "Meine Laufrunde" });
+    $("shotSave").onclick();
+  } catch(e){ if (!/cancel/i.test(String(e && e.message))) toast("Teilen nicht möglich"); }
+};
+$("shotSave").onclick = async () => {
+  try {
+    if (plug("Filesystem")){ await shotFile("DOCUMENTS", "Waldlaeufer/" + shotName()); toast("Gespeichert in Dokumente/Waldlaeufer"); return; }
+    const a = document.createElement("a"); a.href = shot.url; a.download = shotName(); document.body.appendChild(a); a.click(); a.remove();
+  } catch(e){ toast("Speichern nicht möglich – bitte „Teilen“ nutzen"); }
+};
 
 /* ---------- Helfer ---------- */
 function openExternal(url){ if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) location.href = url; else window.open(url, "_blank", "noopener"); }
@@ -2341,7 +2555,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { snap: snapToRoute, edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { snapshotRun, offerPhoto, renderShot, shot, snap: snapToRoute, edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();

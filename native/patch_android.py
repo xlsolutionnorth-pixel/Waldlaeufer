@@ -18,6 +18,7 @@ perms = [
     "android.permission.POST_NOTIFICATIONS",
     "android.permission.WAKE_LOCK",
     "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
+    "android.permission.CAMERA",
 ]
 add = []
 for p in perms:
@@ -25,6 +26,8 @@ for p in perms:
         add.append(f'    <uses-permission android:name="{p}" />')
 if 'android.hardware.location.gps' not in m:
     add.append('    <uses-feature android:name="android.hardware.location.gps" android:required="false" />')
+if 'android.hardware.camera' not in m:
+    add.append('    <uses-feature android:name="android.hardware.camera" android:required="false" />')
 if 'android.intent.action.TTS_SERVICE' not in m:
     add.append('    <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>')
 m = m.replace("</manifest>", "\n".join(add) + "\n</manifest>")
