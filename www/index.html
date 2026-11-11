@@ -224,7 +224,7 @@ body.navigating .topbar,body.navigating #suggest,body.navigating #layerBtn{displ
 .modebar button.ok{background:var(--accent);color:var(--on-accent)}
 .modebar button:disabled{opacity:.4}
 body.editing .topbar,body.drawing .topbar,body.editing #suggest,body.drawing #suggest{display:none}
-body.drawing #map{cursor:crosshair}
+body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!important}
 .handle{width:22px;height:22px;border-radius:50%;background:#fff;border:4px solid var(--hc,#2c9a5a);box-shadow:0 1px 6px rgba(0,0,0,.45)}
 .handle.busy{opacity:.5}
 .leaflet-marker-draggable .handle{cursor:grab}
@@ -1422,6 +1422,16 @@ function mergeLegs(f){
   }));
   return Object.assign({}, f, { properties: Object.assign({}, P, { segments: [{ steps }] }) });
 }
+// Jeden Punkt auf die nächstgelegene Stelle der fertigen Route setzen – in Laufreihenfolge,
+// nah beieinanderliegende Punkte werden zusammengefasst.
+function snapToRoute(r, vias){
+  const cum = r.cum || (r.cum = cumulative(r.coords)), total = cum[cum.length - 1];
+  const pos = vias.map(q => nearestOnRoute(r.coords, cum, q).pos).filter(d => d > 40 && d < total - 40).sort((a, b) => a - b);
+  const out = [];
+  for (const d of pos) if (!out.length || d - out[out.length - 1] > 60) out.push(d);
+  if (!out.length) out.push(total / 2);
+  return out.map(d => pointAt(r.coords, cum, d).ll);
+}
 async function buildViaRoute(pts, profile, nature, radius){
   const tries = [radius, Math.max(600, radius * 3), -1];
   let f = null, err = null;
@@ -1437,7 +1447,7 @@ async function buildViaRoute(pts, profile, nature, radius){
   const C = f.geometry.coordinates, wp = (f.properties && f.properties.way_points) || [];
   const snapped = wp.slice(1, -1).map(ix => C[ix] ? [C[ix][1], C[ix][0]] : null);
   const r = analyse(mergeLegs(f));
-  r.vias = snapped.length === pts.length - 2 && snapped.every(Boolean) ? snapped : pts.slice(1, -1).map(q => q.slice());
+  r.vias = snapToRoute(r, snapped.length === pts.length - 2 && snapped.every(Boolean) ? snapped : pts.slice(1, -1));
   r.dev = 0; r.relaxed = !nature; r.profile = profile;
   return r;
 }
@@ -1732,12 +1742,10 @@ function render(keepView){
         <button data-a="edit" title="Punkte verschieben" aria-label="Bearbeiten">${ic("edit")}</button>
         <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
         <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
-        <button data-a="gmaps" title="In Google Maps öffnen" aria-label="Google Maps">${ic("map")}</button>
       </div>`;
     c.onclick = (e) => {
       const btn = e.target.closest("button"), a = btn && btn.dataset.a;
       if (a === "run"){ const id = results[i].id; if (edit.on) endEdit(true); return startNav(results.find(x => x.id === id) || r); }
-      if (a === "gmaps") return openGoogle(r);
       if (a === "save"){ toggleSave(r); btn.classList.toggle("on", isSaved(r)); return; }
       if (a === "edit"){ if (nav.active){ toast("Erst die Navigation beenden"); return; } return edit.on && edit.i === i ? endEdit(true) : startEdit(i); }
       if (a === "rev"){
@@ -1851,14 +1859,6 @@ function clearRoutes(){
   $("results").innerHTML = "";
 }
 
-function openGoogle(r){
-  // Google erlaubt nur wenige Zwischenpunkte – wir nehmen 8 gleichmäßig verteilte Punkte der Runde
-  const n = 8, pts = [];
-  for (let k = 1; k <= n; k++) pts.push(r.coords[Math.floor(k * (r.coords.length - 1) / (n + 1))]);
-  const s = `${start.lat},${start.lng}`;
-  const url = `https://www.google.com/maps/dir/?api=1&origin=${s}&destination=${s}&travelmode=walking&waypoints=${pts.map(p => p[0].toFixed(5) + "," + p[1].toFixed(5)).join("|")}`;
-  openExternal(url);
-}
 
 /* ---------- Speichern, Verlauf, Neue Suche ---------- */
 const MAX_SAVED = 10, MAX_HISTORY = 10;
@@ -2084,7 +2084,7 @@ function startEdit(i){
   if (draw.on) endDraw();
   const r = results[i];
   Object.assign(edit, { on: true, i, orig: r, undo: [], pending: false, busy: false,
-    vias: (r.vias && r.vias.length ? r.vias : viaPoints(r)).map(q => [q[0], q[1]]),
+    vias: (r.vias && r.vias.length ? snapToRoute(r, r.vias) : viaPoints(r)).map(q => [q[0], q[1]]),
     profile: r.profile || (r.relaxed ? "foot-walking" : "foot-hiking"), nature: !r.relaxed });
   document.body.classList.add("editing");
   setMode("edit"); setSheet(2); select(i); drawHandles();
@@ -2217,6 +2217,9 @@ function drawUndo(){ if (!draw.strokes.length) return; draw.pts.length = draw.st
   el.addEventListener("pointermove", e => { if (draw.on && draw.down && e.isPrimary !== false){ add(e); e.preventDefault(); e.stopPropagation(); } }, true);
   const up = () => { if (draw.down){ draw.down = false; if (draw.strokes.length && draw.pts.length === draw.strokes[draw.strokes.length - 1]) draw.strokes.pop(); updateUndo(); } };
   el.addEventListener("pointerup", up, true); el.addEventListener("pointercancel", up, true);
+  // Zusätzlich die Touch-Ereignisse abfangen, damit Android den Strich nicht als Scrollen/Zoomen abbricht
+  const block = e => { if (draw.on){ e.preventDefault(); e.stopPropagation(); } };
+  ["touchstart", "touchmove"].forEach(t => el.addEventListener(t, block, { capture: true, passive: false }));
 })();
 $("drawBtn").onclick = (e) => { e.stopPropagation(); draw.on ? endDraw() : startDraw(); };
 function finishDraw(){
@@ -2305,7 +2308,7 @@ function fmt(v){ return v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
-window.__app = { edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
+window.__app = { snap: snapToRoute, edit, draw, startEdit, endEdit, editTap, reroute, startDraw, endDraw, sketchSearch, flatEquivalent, durText, gradeFactor, mergeLegs, buildViaRoute, applyTheme, steepness, chooseStart, get startLabel(){ return startLabel; }, reverseRoute, get sortMode(){ return sortMode; }, pruneSpurs, checkBattery, speak, plug, get locked(){ return locked; }, toggleSave, restore, setStart, analyse, overlap, crossings, roundness, isDuplicate, search, startNav, updateNav, nav, get results(){ return results; } };
 
 if (!getKey()) setTimeout(askKey, 600);
 })();
