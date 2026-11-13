@@ -382,7 +382,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
 <div class="modal" id="battModal">
   <div class="box">
     <h2><svg class="i"><use href="#i-info"/></svg>Navigation im Hintergrund</h2>
-    <p>Damit die Ansagen auch bei <b>gesperrtem Bildschirm</b> weiterlaufen, Waldläufer von der <b>Akku-Optimierung ausnehmen</b>. Sonst kann Android die Navigation nach ein paar Minuten beenden.</p>
+    <p data-l10n-html="batt">Damit die Ansagen auch bei <b>gesperrtem Bildschirm</b> weiterlaufen, Waldläufer von der <b>Akku-Optimierung ausnehmen</b>. Sonst kann Android die Navigation nach ein paar Minuten beenden.</p>
     <div class="btns">
       <button id="battLater">Später</button>
       <button class="primary" id="battOk">Erlauben</button>
@@ -447,6 +447,12 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
     <h2 id="keyTitle"><svg class="i"><use href="#i-gear"/></svg>Einstellungen</h2>
     <h3><svg class="i s"><use href="#i-palette"/></svg>FARBSCHEMA</h3>
     <div class="themes" id="themes"></div>
+    <h3><svg class="i s"><use href="#i-info"/></svg>SPRACHE</h3>
+    <div class="seg" id="langSeg">
+      <label><input type="radio" name="lang" value="auto">Auto</label>
+      <label><input type="radio" name="lang" value="de">Deutsch</label>
+      <label><input type="radio" name="lang" value="en">English</label>
+    </div>
     <h3><svg class="i s"><use href="#i-volume"/></svg>ANSAGEN – MUSIK WÄHRENDDESSEN</h3>
     <div class="seg">
       <label><input type="radio" name="duck" value="duck"><svg class="i s"><use href="#i-volume"/></svg>leiser</label>
@@ -495,13 +501,212 @@ const store = {
   set(k, v){ try { localStorage.setItem(k, v); } catch(e){} }
 };
 
+/* ---------- Sprache (Deutsch / Englisch) ---------- */
+// Alle Texte sind auf Deutsch geschrieben. tx`…` übersetzt sie, wenn die App auf Englisch läuft:
+// Platzhalter ${…} werden im Wörterbuch als {0}, {1}, … geschrieben. Ein Eintrag kann auch eine
+// Funktion sein (für Einzahl/Mehrzahl). Fehlt ein Eintrag, bleibt der deutsche Text stehen.
+function langChoice(){ const c = store.get("lang", "auto"); return c === "de" || c === "en" ? c : "auto"; }
+const LANG = langChoice() !== "auto" ? langChoice() : ((navigator.language || "de").toLowerCase().startsWith("de") ? "de" : "en");
+const LOCALE = LANG === "en" ? "en-GB" : "de-DE";
+const SPEECH_LANG = LANG === "en" ? "en-US" : "de-DE";
+document.documentElement.lang = LANG;
+const plural = (n, one, many) => `${n} ${Number(n) === 1 ? one : many}`;
+const EN = {
+  // Farbschemas, Karten
+  "Auto": "Auto", "Hell": "Light", "Dunkel": "Dark", "Ozean": "Ocean", "Sonne": "Sunset",
+  "Wandern": "Hiking", "Straße": "Street", "Satellit": "Satellite",
+  // Startpunkt, Standort
+  "{0}<span class=\"t ph\">Start auf der Karte tippen</span>": "{0}<span class=\"t ph\">Tap the map to set a start</span>",
+  "Start fixiert – „Neu“ tippen zum Ändern": "Start locked – tap “New” to change it",
+  "Kein GPS verfügbar": "GPS not available",
+  "Standort …": "Locating …",
+  "Mein Standort": "My location",
+  "Kein GPS – Berechtigung prüfen oder Start auf der Karte tippen.": "No GPS – check the permission or tap the map to set a start.",
+  // Abbiegehinweise
+  "links abbiegen": "turn left", "rechts abbiegen": "turn right", "scharf links abbiegen": "turn sharp left", "scharf rechts abbiegen": "turn sharp right",
+  "halb links halten": "bear left", "halb rechts halten": "bear right", "geradeaus weiter": "continue straight", "in den Kreisverkehr": "enter the roundabout",
+  "Kreisverkehr verlassen": "exit the roundabout", "umdrehen": "turn around", "Ziel erreicht": "You have arrived", "Los geht's": "Let's go",
+  "links halten": "keep left", "rechts halten": "keep right",
+  "{0} auf {1}": "{0} onto {1}",
+  "Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen.": "This route has no turn instructions – please search again.",
+  "GPS wird gesucht …": "Searching for GPS …",
+  "Navigation gestartet. Runde {0} Kilometer. Viel Spaß!": "Navigation started. Route {0} kilometers. Enjoy your run!",
+  "GPS ungenau (±{0} m)": "GPS inaccurate (±{0} m)",
+  "Waldläufer navigiert": "Waldläufer is navigating",
+  "Runde {0} km – Ansagen auch bei gesperrtem Bildschirm.": "Route {0} km – voice guidance works with the screen locked.",
+  "Standort-Berechtigung fehlt – bitte in den Einstellungen erlauben.": "Location permission missing – please allow it in the settings.",
+  "Kein GPS – bitte Standort-Berechtigung prüfen.": "No GPS – please check the location permission.",
+  "Norden": "north", "Nordosten": "northeast", "Osten": "east", "Südosten": "southeast", "Süden": "south", "Südwesten": "southwest", "Westen": "west", "Nordwesten": "northwest",
+  "Richtung ": "towards the ", "geradeaus": "straight ahead", "hinter dir": "behind you", "rechts": "to the right", "links": "to the left",
+  "Abseits der Route – nächster Routenpunkt {0}": "Off route – nearest route point {0}",
+  "{0} km gelaufen": "{0} km run",
+  "Abseits der Route. Die Strecke geht {0} {1} weiter.": "Off route. The route continues {0} {1}.",
+  "Nächster Routenpunkt {0} {1}.": "Nearest route point {0} {1}.",
+  "{0} Kilometer gelaufen.": "{0} kilometers done.",
+  "Abkürzung erkannt – du sparst {0}. Weiter geht's.": "Shortcut detected – you save {0}. Keep going.",
+  "Abkürzung erkannt: −{0}": "Shortcut detected: −{0}",
+  "Wieder auf der Route.": "Back on route.",
+  "Runde geschafft!": "Route completed!", "Ziel": "Finish",
+  " · {0} km abgekürzt": " · {0} km shortcut", " · {0} km Umweg": " · {0} km detour",
+  "{0} km gelaufen{1}": "{0} km run{1}",
+  ", {0} Kilometer abgekürzt": ", {0} kilometers shortcut", ", davon {0} Kilometer Umweg": ", including a {0} kilometer detour",
+  "Ziel erreicht. Du bist {0} Kilometer gelaufen{1}. Stark!": "You have arrived. You ran {0} kilometers{1}. Great job!",
+  "{0} {1} · {2} ~{3} min · {4} km": "{0} {1} · {2} ~{3} min · {4} km",
+  "Jetzt ": "Now ", "In {0} {1}": "In {0}, {1}", "Noch {0} bis zum Ziel": "{0} to the finish",
+  "{0} Kilometer gelaufen, noch {1} Kilometer.": "{0} kilometers done, {1} kilometers to go.",
+  "Navigation beendet.": "Navigation ended.",
+  // Ortssuche
+  "<div class=\"info\">{0}Schlüssel fehlt – Einstellungen öffnen</div>": "<div class=\"info\">{0}Key missing – open the settings</div>",
+  "<div class=\"info\"><span class=\"spin\"></span>Suche …</div>": "<div class=\"info\"><span class=\"spin\"></span>Searching …</div>",
+  "<div class=\"info\">Ortssuche: keine Verbindung.</div>": "<div class=\"info\">Place search: no connection.</div>",
+  "<div class=\"info\">Ortssuche fehlgeschlagen ({0}{1}).</div>": "<div class=\"info\">Place search failed ({0}{1}).</div>",
+  "<div class=\"info\">{0}Nichts gefunden – z. B. „Hauptstraße 5, Lauf“</div>": "<div class=\"info\">{0}Nothing found – e.g. “10 Main Street, Springfield”</div>",
+  "Während der Navigation nicht möglich": "Not possible during navigation",
+  "Suche läuft noch …": "Search still running …",
+  "Vorherige Runden: siehe „Verlauf“.": "Previous routes: see “History”.",
+  "{0}–{1} min": "{0}–{1} min",
+  // Einstellungen
+  "Spiele Testansage … (am besten vorher Musik starten)": "Playing a test announcement … (start some music first)",
+  "Das ist eine Testansage von Waldläufer. In 200 Metern rechts abbiegen.": "This is a test announcement from Waldläufer. In 200 meters, turn right.",
+  "pausieren": "pause", "leiser stellen": "lower volume",
+  "✅ Sprachausgabe über das Waldläufer-Modul (Modus: {0}).\n": "✅ Voice output via the Waldläufer module (mode: {0}).\n",
+  "Android hat den Audiofokus erteilt – andere Apps sollten jetzt ": "Android granted audio focus – other apps should now ",
+  "kurz pausieren.": "pause briefly.", "leiser werden.": "get quieter.",
+  "\nWird die Musik kaum leiser? Dann „kurz pausieren“ wählen – manche Apps senken nur wenig ab.": "\nMusic barely quieter? Choose “pause” – some apps only lower the volume a little.",
+  "⚠ Android hat den Audiofokus verweigert (z. B. während eines Anrufs).": "⚠ Android refused audio focus (e.g. during a call).",
+  "⚠ Sprachausgabe über „{0}“ – das Waldläufer-Modul fehlt, andere Apps werden nicht leiser.": "⚠ Voice output via “{0}” – the Waldläufer module is missing, other apps won't get quieter.",
+  "Bitte zuerst den Schlüssel einfügen.": "Please paste the key first.",
+  "Teste ab {0}, {1} …": "Testing from {0}, {1} …",
+  "Rundkurs normal": "Loop, normal", "Rundkurs Wald/grün": "Loop, forest/green",
+  " (Gewichtung: {0})": " (weighting: {0})",
+  "✅ {0}: {1} km für 5 km angefragt · Antwort in {2} s{3}": "✅ {0}: {1} km for 5 km requested · response in {2} s{3}",
+  " ⚠ langsam (Routendienst oder Mobilfunk)": " ⚠ slow (routing service or mobile network)",
+  "→ Der Schlüssel ist in Ordnung. Meist ist nur das Minutenlimit (40 Anfragen/Min.) erreicht: 1–2 Minuten warten und erneut testen. Zeigt das openrouteservice-Dashboard bei „Directions V2“ 0 übrig, ist das Tageskontingent verbraucht.":
+    "→ The key is fine. Usually only the per-minute limit (40 requests/min) was reached: wait 1–2 minutes and test again. If the openrouteservice dashboard shows 0 left for “Directions V2”, the daily quota is used up.",
+  "→ Schlüssel prüfen: im openrouteservice-Dashboard kopieren und ohne Leerzeichen einfügen.": "→ Check the key: copy it from the openrouteservice dashboard and paste it without spaces.",
+  "→ Zu viele Anfragen in kurzer Zeit – 1 Minute warten und erneut testen.": "→ Too many requests in a short time – wait 1 minute and test again.",
+  "Heute verbraucht: {0} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).": "Used today: {0} route requests (free limit: 2000 per day).",
+  "\nLaut Routendienst noch übrig: {0}.": "\nRemaining according to the routing service: {0}.",
+  "\nKontingent wird zurückgesetzt: {0}.": "\nQuota resets: {0}.",
+  " (Server: {0})": " (server: {0})",
+  "Kontingent des Routendienstes aufgebraucht": "Routing service quota used up",
+  "API-Schlüssel abgelehnt": "API key rejected",
+  "Zu viele Anfragen pro Minute": "Too many requests per minute",
+  "Keine Verbindung zum Routendienst (": "No connection to the routing service (",
+  "Keine Route": "No route",
+  // Suche
+  "Zuerst Start auf der Karte tippen.": "Tap the map to set a start first.",
+  "Suche Wald- und Feldwege": "Searching forest and field paths",
+  "Erweitere Suche auf alle Wege": "Widening the search to all paths",
+  "Wald & Feld": "Forest & field", "Alle Wege": "All paths",
+  "{0} … {1} Runde{2} · {3}/{4}": v => `${v[0]} … ${plural(v[1], "route", "routes")} · ${v[3]}/${v[4]}`,
+  "Routendienst bremst (40/Min.) – weiter in {0} s · {1} Runde{2}": v => `Routing service is throttling (40/min) – continuing in ${v[0]} s · ${plural(v[1], "route", "routes")}`,
+  " – Internet prüfen.": " – check the internet connection.",
+  "Der Routendienst meldet einen Fehler: ": "The routing service reports an error: ",
+  "Routendienst lehnt ab (Kontingent). In ein paar Minuten erneut – Stand in den Einstellungen.": "Routing service refused (quota). Try again in a few minutes – status in the settings.",
+  " – Einstellungen prüfen.": " – check the settings.",
+  "Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen.": "The routing service is throttling (too many requests). Please search again in a few minutes.",
+  "Der Routendienst hat keine Route geliefert": "The routing service returned no route",
+  " Bisher: die nächstgelegenen Runden.": " So far: the closest routes.",
+  "Nichts mit {0} ±{1} km – die nächstgelegenen Runden:": "Nothing with {0} ±{1} km – the closest routes:",
+  " · vorzeitig beendet: ": " · stopped early: ",
+  "{0} Runde{1} gefunden": v => `${plural(v[0], "route", "routes")} found`,
+  // Rundenkarte
+  "Laufzeit bei {0} min/km": "Time at {0} min/km", "Höhenmeter bergauf": "Elevation gain", "sauberer Rundkurs": "clean loop",
+  "nach deiner Skizze": "from your sketch", "von dir bearbeitet": "edited by you", "Wald- und Feldwege": "Forest and field paths",
+  "Nebenstraße / Gehweg": "Side street / sidewalk", "Rad- / Asphaltweg": "Bike / paved path", "Hauptstraße": "Main road",
+  "mäßig steil (5–10 %)": "moderately steep (5–10 %)", "steil (über 10 %)": "steep (over 10 %)", "doppelt gelaufen": "run twice",
+  "Kreuzungen der eigenen Strecke": "Self-crossings", "mittlerer Abstand zu deiner Skizze": "average distance to your sketch",
+  "im Uhrzeigersinn": "clockwise", "gegen den Uhrzeigersinn": "counter-clockwise",
+  "Im Uhrzeigersinn": "Clockwise", "Gegen den Uhrzeigersinn": "Counter-clockwise",
+  "<div class=\"hint\">{0}{1}{2} km zur Wunschdistanz</div>": "<div class=\"hint\">{0}{1}{2} km from the target distance</div>",
+  "1 Stichweg entfernt": "1 dead end removed", "{0} Stichwege entfernt": "{0} dead ends removed",
+  "<div class=\"hint\">{0}nur mit mehr Straße möglich</div>": "<div class=\"hint\">{0}only possible with more road</div>",
+  "Start": "Start", "Anpassen": "Adjust", "Umkehren": "Reverse", "Speichern": "Save",
+  "Punkte verschieben": "Move points", "Richtung umkehren": "Reverse direction",
+  "Erst die Navigation beenden": "End the navigation first",
+  // Gespeichert / Verlauf / Standorte
+  "Entfernt": "Removed",
+  "Maximal {0} – erst eine unter „Gespeichert“ löschen": "Maximum {0} – delete one under “Saved” first",
+  "Gespeichert ({0}/{1})": "Saved ({0}/{1})", "Speicher voll": "Storage full",
+  "heute {0}": "today {0}", "gestern {0}": "yesterday {0}",
+  "VERLAUF": "HISTORY", "GESPEICHERT": "SAVED", "MEINE STANDORTE": "MY PLACES", "löschen": "delete",
+  "{0} Runden": v => plural(v[0], "route", "routes"),
+  "<div class=\"empty\">Noch keine Suchen</div>": "<div class=\"empty\">No searches yet</div>",
+  "<div class=\"empty\">{0}<br>Noch nichts gespeichert</div>": "<div class=\"empty\">{0}<br>Nothing saved yet</div>",
+  "Suche von {0}": "Search from {0}", "Gespeicherte Runde": "Saved route",
+  "Start auf der Karte tippen, Standort nutzen oder Ort suchen.": "Tap the map, use your location or search for a place.",
+  "<div class=\"empty\">Noch keine Standorte</div>": "<div class=\"empty\">No places yet</div>",
+  "Name für den Startpunkt": "Name for the start point", "Erst Start wählen": "Choose a start first",
+  "Standort {0}": "Place {0}", "Maximal {0} – erst einen löschen": "Maximum {0} – delete one first",
+  "Schon gespeichert": "Already saved", "„{0}“ gespeichert": "“{0}” saved",
+  // Anpassen / Zeichnen
+  "{0}<span>Punkte ziehen<small>Kleine Punkte = neuer Punkt</small></span>": "{0}<span>Drag points<small>Small dots = new point</small></span>",
+  "{0}<span>Runde zeichnen<small>Finger über die Karte ziehen</small></span>": "{0}<span>Draw a route<small>Drag your finger across the map</small></span>",
+  "Ein Punkt muss bleiben": "One point must remain",
+  "Auf die Linie tippen für einen neuen Punkt": "Tap the line to add a point",
+  "Runde wird angepasst …": "Adjusting route …",
+  "Schlüssel abgelehnt – Einstellungen prüfen": "Key rejected – check the settings",
+  "Routendienst bremst – gleich nochmal": "Routing service is throttling – try again shortly",
+  "Keine Verbindung": "No connection", "Dort führt kein Weg hin – zurückgesetzt": "No path leads there – reset",
+  "Bitte eine längere Strecke zeichnen": "Please draw a longer route",
+  "Zu lang – bitte näher heranzoomen und neu zeichnen": "Too long – zoom in and draw again",
+  "Beginn der Skizze": "Start of sketch",
+  "Eng an der Skizze": "Close to the sketch", "Mehr Wald & Feld": "More forest & field", "Freier geführt": "Looser fit",
+  "Verfeinere": "Refining", "Räume auf": "Cleaning up",
+  "Keine Runde entlang der Skizze gefunden": "No route found along the sketch",
+  "{0} Variante{1} nach deiner Skizze": v => `${plural(v[0], "variant", "variants")} from your sketch`,
+  "Punkte ziehen zum Anpassen · ✓ wenn fertig": "Drag points to adjust · ✓ when done",
+  // Erinnerungsbild
+  "{0} {1} km &nbsp; {2} {3}:{4} min &nbsp; {5} /km": "{0} {1} km &nbsp; {2} {3}:{4} min &nbsp; {5} /km",
+  "Kamera nicht verfügbar – Berechtigung prüfen": "Camera not available – check the permission",
+  "Meine Laufrunde": "My run", "Teilen nicht möglich": "Sharing not possible",
+  "Gespeichert in Dokumente/Waldlaeufer": "Saved to Documents/Waldlaeufer",
+  "Speichern nicht möglich – bitte „Teilen“ nutzen": "Saving not possible – please use “Share”",
+  // Feste Texte der Oberfläche (HTML)
+  "15:00 · wandern": "15:00 · hiking", "ANSAGEN – MUSIK WÄHRENDDESSEN": "ANNOUNCEMENTS – MUSIC MEANWHILE", "API-Schlüssel einfügen": "Paste API key",
+  "Abbrechen": "Cancel", "Ansage testen": "Test announcement", "Auslösen": "Take photo", "Beenden": "End", "Berechne …": "Calculating …",
+  "Die Laufzeit berücksichtigt Steigungen: bergauf langsamer, leicht bergab etwas schneller.": "The time accounts for gradients: slower uphill, slightly faster on gentle downhills.",
+  "Ein Erinnerungsbild mit deiner Strecke machen?": "Take a souvenir photo with your route?",
+  "Einstellungen": "Settings", "Erlauben": "Allow", "FARBSCHEMA": "COLOR SCHEME", "Fertig": "Done", "Flach": "Flat", "Foto machen": "Take photo",
+  "Gespeichert": "Saved", "Hügelig": "Hilly", "Kamera wechseln": "Switch camera", "Kartenart": "Map type", "Kostenlos unter": "Free at",
+  "Lauftempo": "Pace", "Meine Standorte": "My places", "Nah": "Close", "Navigation im Hintergrund": "Navigation in the background",
+  "Nein danke": "No thanks", "Neu": "New", "Neues Foto": "New photo", "Nicht mehr fragen": "Don't ask again", "Ohne Foto": "Without photo",
+  "Ort oder Adresse suchen": "Search place or address", "ROUTENDIENST (OPENROUTESERVICE)": "ROUTING SERVICE (OPENROUTESERVICE)",
+  "Routen suchen": "Find routes", "Rückgängig": "Undo", "Schließen": "Close",
+  "Schlüssel ist in dieser Tester-Version eingebaut.": "The key is built into this tester version.",
+  "Später": "Later", "Strecke auf dem Foto": "Route on the photo", "Strecke darunter": "Route below", "Teilen": "Share", "Ton": "Sound",
+  "Top": "Top", "Verbindung testen": "Test connection", "Verlauf": "History", "Zeichnen": "Draw", "leiser": "lower", "mehr": "more",
+  "weniger": "less", "schnell · 3:00": "fast · 3:00", "SPRACHE": "LANGUAGE",
+  "batt": "To keep announcements running with the <b>screen locked</b>, <b>exclude Waldläufer from battery optimization</b>. Otherwise Android may stop the navigation after a few minutes."
+};
+function tx(strings, ...vals){
+  let key = strings[0];
+  for (let i = 0; i < vals.length; i++) key += "{" + i + "}" + strings[i + 1];
+  if (LANG !== "en") return vals.length ? key.replace(/\{(\d+)\}/g, (_, i) => vals[i]) : key;
+  const t = EN[key];
+  if (typeof t === "function") return t(vals);
+  return (t ?? key).replace(/\{(\d+)\}/g, (_, i) => vals[i]);
+}
+function translatePage(){
+  if (LANG !== "en") return;
+  const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = []; while (walk.nextNode()) nodes.push(walk.currentNode);
+  nodes.forEach(n => { const t = n.nodeValue.trim(); if (t && EN[t] && typeof EN[t] === "string") n.nodeValue = n.nodeValue.replace(t, EN[t]); });
+  document.querySelectorAll("[placeholder],[title],[aria-label]").forEach(el => ["placeholder", "title", "aria-label"].forEach(a => {
+    const v = el.getAttribute(a); if (v && typeof EN[v] === "string") el.setAttribute(a, EN[v]);
+  }));
+  document.querySelectorAll("[data-l10n-html]").forEach(el => { const v = EN[el.dataset.l10nHtml]; if (v) el.innerHTML = v; });
+}
+translatePage();
+
 /* ---------- Farbschemas ---------- */
 // Zustände für "Punkte verschieben" und "Route zeichnen" (Funktionen weiter unten)
 const edit = { on: false, i: -1, vias: [], marks: [], undo: [], busy: false, pending: false, orig: null, profile: "foot-hiking", nature: true };
 const draw = { on: false, pts: [], strokes: [], line: null, down: false, sketch: null };
-const THEMES = [["auto", "Auto", "linear-gradient(135deg,#ffffff 50%,#171d19 50%)"], ["light", "Hell", "linear-gradient(135deg,#ffffff,#1e7a46)"],
-                ["dark", "Dunkel", "linear-gradient(135deg,#171d19,#4cc27a)"], ["ocean", "Ozean", "linear-gradient(135deg,#11202f,#3ea6ff)"],
-                ["sun", "Sonne", "linear-gradient(135deg,#fffaf5,#d9581f)"]];
+const THEMES = [["auto", tx`Auto`, "linear-gradient(135deg,#ffffff 50%,#171d19 50%)"], ["light", tx`Hell`, "linear-gradient(135deg,#ffffff,#1e7a46)"],
+                ["dark", tx`Dunkel`, "linear-gradient(135deg,#171d19,#4cc27a)"], ["ocean", tx`Ozean`, "linear-gradient(135deg,#11202f,#3ea6ff)"],
+                ["sun", tx`Sonne`, "linear-gradient(135deg,#fffaf5,#d9581f)"]];
 const darkMQ = window.matchMedia ? matchMedia("(prefers-color-scheme: dark)") : null;
 function themeChoice(){ const t = store.get("theme", "auto"); return THEMES.some(x => x[0] === t) ? t : "auto"; }
 function applyTheme(){
@@ -536,9 +741,9 @@ const layers = {
 L.control.attribution({ position: "bottomleft", prefix: "Leaflet" }).addTo(map);
 let curLayer = layers[store.get("layer", "Wanderkarte")] ? store.get("layer", "Wanderkarte") : "Wanderkarte";
 layers[curLayer].addTo(map);
-const LAYER_UI = { "Wanderkarte": ["Wandern", "linear-gradient(135deg,#d8e8c8,#a9cb92 55%,#efe6c8)"],
-                   "Straßenkarte": ["Straße", "linear-gradient(135deg,#f3efe8,#ffffff 50%,#f6d9a8)"],
-                   "Satellit": ["Satellit", "linear-gradient(135deg,#2f4a2c,#5b6e45 60%,#3a4d5c)"] };
+const LAYER_UI = { "Wanderkarte": [tx`Wandern`, "linear-gradient(135deg,#d8e8c8,#a9cb92 55%,#efe6c8)"],
+                   "Straßenkarte": [tx`Straße`, "linear-gradient(135deg,#f3efe8,#ffffff 50%,#f6d9a8)"],
+                   "Satellit": [tx`Satellit`, "linear-gradient(135deg,#2f4a2c,#5b6e45 60%,#3a4d5c)"] };
 function buildLayerMenu(){
   $("layerMenu").innerHTML = Object.keys(layers).map(n => `<button data-l="${n}" class="${n === curLayer ? "on" : ""}"><span class="sw" style="background:${LAYER_UI[n][1]}"></span>${LAYER_UI[n][0]}</button>`).join("");
 }
@@ -577,13 +782,13 @@ function setStart(lat, lng, label, keepResults){
 function startText(){ return startLabel ? escapeHtml(startLabel) : start.lat.toFixed(5) + ", " + start.lng.toFixed(5); }
 function updateStartInfo(){
   const el = $("startinfo");
-  if (!start){ el.className = "startinfo"; el.innerHTML = `${ic("pin")}<span class="t ph">Start auf der Karte tippen</span>`; return; }
+  if (!start){ el.className = "startinfo"; el.innerHTML = tx`${ic("pin")}<span class="t ph">Start auf der Karte tippen</span>`; return; }
   el.className = "startinfo" + (locked ? " locked" : "");
   el.innerHTML = `${ic("pin")}<span class="t">${startText()}</span>` + (locked ? `<span class="lock" title="Start fixiert – „Neu“ tippen zum Ändern">${ic("lock", "s")}</span>` : "");
   try { startMarker && startMarker.dragging && (locked ? startMarker.dragging.disable() : startMarker.dragging.enable()); } catch(e){}
 }
 function setLocked(v){ locked = v; updateStartInfo(); }
-function lockedHint(){ toast("Start fixiert – „Neu“ tippen zum Ändern"); }
+function lockedHint(){ toast(tx`Start fixiert – „Neu“ tippen zum Ändern`); }
 let toastTimer;
 function toast(t){ const el = $("toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("show"), 2600); }
 map.on("click", e => {
@@ -613,18 +818,18 @@ async function getPosition(){
   }
   return new Promise((res, rej) => navigator.geolocation
     ? navigator.geolocation.getCurrentPosition(p => res(p.coords), rej, { enableHighAccuracy:true, timeout:15000, maximumAge:20000 })
-    : rej(new Error("Kein GPS verfügbar")));
+    : rej(new Error(tx`Kein GPS verfügbar`)));
 }
 
 $("locBtn").onclick = async () => {
-  busy(true, "Standort …");
+  busy(true, tx`Standort …`);
   try {
     const c = await getPosition();
     showMe(c.latitude, c.longitude);
     busy(false);
-    chooseStart(c.latitude, c.longitude, "Mein Standort");
+    chooseStart(c.latitude, c.longitude, tx`Mein Standort`);
   } catch(e){
-    busy(false); status("Kein GPS – Berechtigung prüfen oder Start auf der Karte tippen.");
+    busy(false); status(tx`Kein GPS – Berechtigung prüfen oder Start auf der Karte tippen.`);
   }
 };
 
@@ -636,10 +841,10 @@ function showMe(lat, lng){
 /* ---------- Abbiege-Navigation ---------- */
 // openrouteservice-Manövertypen → Pfeil + kurze Ansage
 const MANEUVER = {
-  0:["⬅","links abbiegen"], 1:["➡","rechts abbiegen"], 2:["↙","scharf links abbiegen"], 3:["↘","scharf rechts abbiegen"],
-  4:["↖","halb links halten"], 5:["↗","halb rechts halten"], 6:["⬆","geradeaus weiter"], 7:["⟳","in den Kreisverkehr"],
-  8:["⟳","Kreisverkehr verlassen"], 9:["↩","umdrehen"], 10:["🏁","Ziel erreicht"], 11:["⬆","Los geht's"],
-  12:["↖","links halten"], 13:["↗","rechts halten"]
+  0:["⬅",tx`links abbiegen`], 1:["➡",tx`rechts abbiegen`], 2:["↙",tx`scharf links abbiegen`], 3:["↘",tx`scharf rechts abbiegen`],
+  4:["↖",tx`halb links halten`], 5:["↗",tx`halb rechts halten`], 6:["⬆",tx`geradeaus weiter`], 7:["⟳",tx`in den Kreisverkehr`],
+  8:["⟳",tx`Kreisverkehr verlassen`], 9:["↩",tx`umdrehen`], 10:["🏁",tx`Ziel erreicht`], 11:["⬆",tx`Los geht's`],
+  12:["↖",tx`links halten`], 13:["↗",tx`rechts halten`]
 };
 const ANNOUNCE_FAR = 120, ANNOUNCE_NOW = 25, OFF_ROUTE_M = 45;
 // Abbiegepfeil wie in Navi-Apps: gerade hoch, dann in Abbiegerichtung
@@ -677,8 +882,8 @@ function speak(text, force){
 }
 function fallbackSpeak(text){
   const T = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.TextToSpeech;
-  if (T){ T.speak({ text, lang:"de-DE", rate:1.0, queueStrategy:1 }).catch(() => {}); return "tts-plugin"; }
-  try { const u = new SpeechSynthesisUtterance(text); u.lang = "de-DE"; speechSynthesis.speak(u); return "browser"; } catch(e){ return "keine"; }
+  if (T){ T.speak({ text, lang:SPEECH_LANG, rate:1.0, queueStrategy:1 }).catch(() => {}); return "tts-plugin"; }
+  try { const u = new SpeechSynthesisUtterance(text); u.lang = SPEECH_LANG; speechSynthesis.speak(u); return "browser"; } catch(e){ return "keine"; }
 }
 function vibrate(p){ try { navigator.vibrate && navigator.vibrate(p); } catch(e){} }
 
@@ -722,13 +927,13 @@ function locate(p){
 }
 
 function fmtDist(m){ return m >= 1000 ? fmt(m / 1000) + " km" : (Math.round(m / 10) * 10) + " m"; }
-function spokenDist(m){ return m >= 1000 ? fmt(m / 1000) + " Kilometern" : (Math.round(m / 10) * 10) + " Metern"; }
+function spokenDist(m){ return LANG === "en" ? (m >= 1000 ? fmt(m / 1000) + " kilometers" : (Math.round(m / 10) * 10) + " meters") : (m >= 1000 ? fmt(m / 1000) + " Kilometern" : (Math.round(m / 10) * 10) + " Metern"); }
 
 function stepPhrase(st){
   const m = MANEUVER[st.type] || ["⬆", ""];
-  if (st.type === 10) return "Ziel erreicht";
+  if (st.type === 10) return tx`Ziel erreicht`;
   let txt = m[1];
-  if (st.name && st.type !== 6) txt += " auf " + st.name;
+  if (st.name && st.type !== 6) txt = tx`${txt} auf ${st.name}`;
   // Kreisverkehr: ORS-Text enthält die Ausfahrt – den lieber direkt nehmen
   if (st.type === 7 && st.text) txt = st.text;
   return txt.charAt(0).toUpperCase() + txt.slice(1);
@@ -736,22 +941,22 @@ function stepPhrase(st){
 
 async function startNav(r){
   if (nav.active) stopNav(true);
-  if (!r.steps || !r.steps.length){ status("Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen."); return; }
+  if (!r.steps || !r.steps.length){ status(tx`Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen.`); return; }
   Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0,
     ran:0, track:[], t0:0, photoAsked:false, anchor:null, hAnchor:null, heading:null, leavePos:null, leaveRan:0, saved:0, offGuide:0 });
   document.body.classList.add("navigating");
   $("nav").style.display = "block"; $("nav").classList.remove("off");
   $("navMute").innerHTML = ic(nav.muted ? "mute" : "volume");
   setArrow(turnIcon(6)); $("navDist").textContent = fmtDist(nav.cum[nav.cum.length - 1]);
-  $("navText").textContent = "GPS wird gesucht …"; $("navInfo").textContent = "";
+  $("navText").textContent = tx`GPS wird gesucht …`; $("navInfo").textContent = "";
   setSheet(2);
   map.setView(r.coords[0], 17);
   try { if (navigator.wakeLock) nav.wake = await navigator.wakeLock.request("screen"); } catch(e){}
-  speak(`Navigation gestartet. Runde ${fmt(r.distKm)} Kilometer. Viel Spaß!`);
+  speak(tx`Navigation gestartet. Runde ${fmt(r.distKm)} Kilometer. Viel Spaß!`);
 
   const onPos = (c) => {
     if (!nav.active || !c) return;
-    if (c.accuracy && c.accuracy > 60) { $("navInfo").textContent = `GPS ungenau (±${Math.round(c.accuracy)} m)`; return; }
+    if (c.accuracy && c.accuracy > 60) { $("navInfo").textContent = tx`GPS ungenau (±${Math.round(c.accuracy)} m)`; return; }
     updateNav([c.latitude, c.longitude]);
   };
   const P = geoPlugin(), BG = plug("BackgroundGeolocation"), W = plug("WaldNative");
@@ -762,13 +967,13 @@ async function startNav(r){
       // Android zeigt dazu eine dauerhafte Benachrichtigung.
       if (W) { try { await W.requestNotificationPermission(); } catch(e){} }
       nav.watch = await BG.addWatcher({
-        backgroundTitle: "Waldläufer navigiert",
-        backgroundMessage: `Runde ${fmt(r.distKm)} km – Ansagen auch bei gesperrtem Bildschirm.`,
+        backgroundTitle: tx`Waldläufer navigiert`,
+        backgroundMessage: tx`Runde ${fmt(r.distKm)} km – Ansagen auch bei gesperrtem Bildschirm.`,
         requestPermissions: true, stale: false, distanceFilter: 3
       }, (loc, err) => {
         if (err){
           if (err.code === "NOT_AUTHORIZED"){
-            $("navText").textContent = "Standort-Berechtigung fehlt – bitte in den Einstellungen erlauben.";
+            $("navText").textContent = tx`Standort-Berechtigung fehlt – bitte in den Einstellungen erlauben.`;
             try { BG.openSettings(); } catch(e){}
           }
           return;
@@ -783,7 +988,7 @@ async function startNav(r){
     } else if (navigator.geolocation){
       nav.watch = navigator.geolocation.watchPosition(p => onPos(p.coords), () => {}, { enableHighAccuracy:true, maximumAge:0 });
     }
-  } catch(e){ $("navText").textContent = "Kein GPS – bitte Standort-Berechtigung prüfen."; }
+  } catch(e){ $("navText").textContent = tx`Kein GPS – bitte Standort-Berechtigung prüfen.`; }
 }
 
 // Himmelsrichtung von a nach b in Grad (0 = Norden, im Uhrzeigersinn)
@@ -792,11 +997,11 @@ function bearing(a, b){
   const x = Math.cos(a[0]*t) * Math.sin(b[0]*t) - Math.sin(a[0]*t) * Math.cos(b[0]*t) * Math.cos((b[1]-a[1])*t);
   return (Math.atan2(y, x) / t + 360) % 360;
 }
-const COMPASS = ["Norden", "Nordosten", "Osten", "Südosten", "Süden", "Südwesten", "Westen", "Nordwesten"];
+const COMPASS = [tx`Norden`, tx`Nordosten`, tx`Osten`, tx`Südosten`, tx`Süden`, tx`Südwesten`, tx`Westen`, tx`Nordwesten`];
 function directionWord(brg){
-  if (nav.heading === null) return "Richtung " + COMPASS[Math.round(brg / 45) % 8];
+  if (nav.heading === null) return tx`Richtung ` + COMPASS[Math.round(brg / 45) % 8];
   const d = ((brg - nav.heading + 540) % 360) - 180;
-  return Math.abs(d) < 30 ? "geradeaus" : Math.abs(d) > 150 ? "hinter dir" : d > 0 ? "rechts" : "links";
+  return Math.abs(d) < 30 ? tx`geradeaus` : Math.abs(d) > 150 ? tx`hinter dir` : d > 0 ? tx`rechts` : tx`links`;
 }
 function setArrow(html, rot){
   $("navArrow").innerHTML = `<span style="display:grid;transform:rotate(${Math.round(rot || 0)}deg)">${html}</span>`;
@@ -833,17 +1038,17 @@ function updateNav(p){
       box.classList.add("off");
       setArrow(turnIcon(6), brg);
       $("navDist").textContent = fmtDist(loc.d);
-      $("navText").textContent = `Abseits der Route – nächster Routenpunkt ${word}`;
-      $("navInfo").textContent = `${ranKm} km gelaufen`;
+      $("navText").textContent = tx`Abseits der Route – nächster Routenpunkt ${word}`;
+      $("navInfo").textContent = tx`${ranKm} km gelaufen`;
       if (!nav.offSaid){
-        speak(`Abseits der Route. Die Strecke geht ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word} weiter.`);
+        speak(tx`Abseits der Route. Die Strecke geht ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word} weiter.`);
         vibrate([300, 150, 300]); nav.offSaid = true; nav.offGuide = Date.now();
       } else if (Date.now() - nav.offGuide > 90000){
         // alle 1,5 Minuten kurz erinnern, wohin es geht
         nav.offGuide = Date.now();
-        speak(`Nächster Routenpunkt ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word}.`);
+        speak(tx`Nächster Routenpunkt ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word}.`);
       }
-      if (nav.kmPending){ nav.kmPending = false; speak(`${nav.km} Kilometer gelaufen.`); }
+      if (nav.kmPending){ nav.kmPending = false; speak(tx`${nav.km} Kilometer gelaufen.`); }
       return;
     }
   } else {
@@ -852,9 +1057,9 @@ function updateNav(p){
       const jump = loc.pos - nav.leavePos, detour = nav.ran - nav.leaveRan, saved = jump - detour;
       if (jump > 300 && saved > 200){
         nav.saved += saved;
-        speak(`Abkürzung erkannt – du sparst ${spokenDist(saved).replace("Metern", "Meter").replace("Kilometern", "Kilometer")}. Weiter geht's.`);
-        toast(`Abkürzung erkannt: −${fmtDist(saved)}`);
-      } else if (nav.offSaid) speak("Wieder auf der Route.");
+        speak(tx`Abkürzung erkannt – du sparst ${spokenDist(saved).replace("Metern", "Meter").replace("Kilometern", "Kilometer")}. Weiter geht's.`);
+        toast(tx`Abkürzung erkannt: −${fmtDist(saved)}`);
+      } else if (nav.offSaid) speak(tx`Wieder auf der Route.`);
     }
     nav.offSince = 0; nav.offSaid = false; nav.leavePos = null; box.classList.remove("off");
     if (loc.pos >= cum[nav.idx] - 30) nav.idx = loc.idx;   // nur vorwärts übernehmen
@@ -871,15 +1076,15 @@ function updateNav(p){
   const remaining = Math.max(0, total - pos);
 
   if (!next || remaining < 25){
-    setArrow(ic("flag")); $("navDist").textContent = "Ziel"; $("navText").textContent = "Runde geschafft!";
+    setArrow(ic("flag")); $("navDist").textContent = tx`Ziel`; $("navText").textContent = tx`Runde geschafft!`;
     const diff = total - nav.ran;
-    const extra = diff > 300 ? ` · ${fmt(diff / 1000)} km abgekürzt` : diff < -300 ? ` · ${fmt(-diff / 1000)} km Umweg` : "";
-    $("navInfo").textContent = `${ranKm} km gelaufen${extra}`;
+    const extra = diff > 300 ? tx` · ${fmt(diff / 1000)} km abgekürzt` : diff < -300 ? tx` · ${fmt(-diff / 1000)} km Umweg` : "";
+    $("navInfo").textContent = tx`${ranKm} km gelaufen${extra}`;
     if (!nav.spoken.goal && remaining < 40){
       nav.spoken.goal = true;
       if (!nav.photoAsked){ nav.photoAsked = true; const run = snapshotRun(); setTimeout(() => offerPhoto(run), 2500); }
-      const extraSpoken = diff > 300 ? `, ${fmt(diff / 1000)} Kilometer abgekürzt` : diff < -300 ? `, davon ${fmt(-diff / 1000)} Kilometer Umweg` : "";
-      speak(`Ziel erreicht. Du bist ${ranKm} Kilometer gelaufen${extraSpoken}. Stark!`);
+      const extraSpoken = diff > 300 ? tx`, ${fmt(diff / 1000)} Kilometer abgekürzt` : diff < -300 ? tx`, davon ${fmt(-diff / 1000)} Kilometer Umweg` : "";
+      speak(tx`Ziel erreicht. Du bist ${ranKm} Kilometer gelaufen${extraSpoken}. Stark!`);
       vibrate([200, 100, 200, 100, 400]);
     }
     return;
@@ -889,19 +1094,19 @@ function updateNav(p){
   $("navDist").textContent = fmtDist(next.dist);
   $("navText").textContent = phrase;
   const left = remaining * (flatEquivalent(r) / (total || 1)) / 1000 * paceMid();
-  $("navInfo").innerHTML = `${ic("flag", "xs")} ${fmtDist(remaining)} · ${ic("timer", "xs")} ~${Math.max(1, Math.round(left / 60))} min · ${ranKm} km`;
+  $("navInfo").innerHTML = tx`${ic("flag", "xs")} ${fmtDist(remaining)} · ${ic("timer", "xs")} ~${Math.max(1, Math.round(left / 60))} min · ${ranKm} km`;
 
   // Sprachansagen: einmal vorher, einmal direkt am Abzweig
   const key = next.k;
   if (next.dist <= ANNOUNCE_NOW && !nav.spoken["n" + key]){
     nav.spoken["n" + key] = nav.spoken["f" + key] = true;
-    if (next.st.type !== 10){ speak("Jetzt " + phrase.charAt(0).toLowerCase() + phrase.slice(1)); vibrate(400); }
+    if (next.st.type !== 10){ speak(tx`Jetzt ` + phrase.charAt(0).toLowerCase() + phrase.slice(1)); vibrate(400); }
   } else if (next.dist <= ANNOUNCE_FAR && next.dist > ANNOUNCE_NOW + 30 && !nav.spoken["f" + key]){
     nav.spoken["f" + key] = true;
-    speak(next.st.type === 10 ? `Noch ${spokenDist(next.dist).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} bis zum Ziel` : `In ${spokenDist(next.dist)} ${phrase.charAt(0).toLowerCase() + phrase.slice(1)}`);
+    speak(next.st.type === 10 ? tx`Noch ${spokenDist(next.dist).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} bis zum Ziel` : tx`In ${spokenDist(next.dist)} ${phrase.charAt(0).toLowerCase() + phrase.slice(1)}`);
   }
   // Kilometer-Ansage nach tatsächlich gelaufener Strecke
-  if (nav.kmPending){ nav.kmPending = false; if (remaining > 300) speak(`${nav.km} Kilometer gelaufen, noch ${fmt(remaining / 1000)} Kilometer.`); }
+  if (nav.kmPending){ nav.kmPending = false; if (remaining > 300) speak(tx`${nav.km} Kilometer gelaufen, noch ${fmt(remaining / 1000)} Kilometer.`); }
 }
 
 function stopNav(silent){
@@ -921,7 +1126,7 @@ function stopNav(silent){
   document.body.classList.remove("navigating");
   $("nav").style.display = "none";
   setSheet(0);
-  if (!silent) speak("Navigation beendet.");
+  if (!silent) speak(tx`Navigation beendet.`);
 }
 // Akku-Optimierung: Viele Handys beenden Apps im Hintergrund trotz Benachrichtigung.
 // Einmal (und danach höchstens noch zweimal) freundlich darauf hinweisen.
@@ -981,23 +1186,23 @@ function parseCoords(s){
 async function geocode(text, kind){
   const key = getKey();
   if (!text) return;
-  if (!key){ showSuggest(`<div class="info">${ic("key", "s")}Schlüssel fehlt – Einstellungen öffnen</div>`); return; }
+  if (!key){ showSuggest(tx`<div class="info">${ic("key", "s")}Schlüssel fehlt – Einstellungen öffnen</div>`); return; }
   const seq = ++geoSeq;
-  if (kind === "search") showSuggest('<div class="info"><span class="spin"></span>Suche …</div>');
+  if (kind === "search") showSuggest(tx`<div class="info"><span class="spin"></span>Suche …</div>`);
   // Suche um deinen Standort bzw. den Kartenausschnitt herum bevorzugen
   const f = meMarker ? meMarker.getLatLng() : map.getCenter();
-  const url = `${GEOCODE}/${kind}?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=de&size=7&focus.point.lat=${f.lat}&focus.point.lon=${f.lng}`;
+  const url = `${GEOCODE}/${kind}?api_key=${encodeURIComponent(key)}&text=${encodeURIComponent(text)}&lang=${LANG}&size=7&focus.point.lat=${f.lat}&focus.point.lon=${f.lng}`;
   let r, j = null;
   try { r = await fetch(url, { headers: { "Authorization": key, "Accept": "application/json" } }); }
-  catch(e){ if (seq === geoSeq) showSuggest('<div class="info">Ortssuche: keine Verbindung.</div>'); return; }
+  catch(e){ if (seq === geoSeq) showSuggest(tx`<div class="info">Ortssuche: keine Verbindung.</div>`); return; }
   try { j = await r.json(); } catch(e){}
   if (seq !== geoSeq) return;                       // inzwischen neuer Text eingegeben
   if (!r.ok){
     const msg = j && j.error ? (typeof j.error === "string" ? j.error : j.error.message || "") : "";
-    showSuggest(`<div class="info">Ortssuche fehlgeschlagen (${r.status}${msg ? ": " + escapeHtml(msg) : ""}).</div>`); return;
+    showSuggest(tx`<div class="info">Ortssuche fehlgeschlagen (${r.status}${msg ? ": " + escapeHtml(msg) : ""}).</div>`); return;
   }
   const feats = (j && j.features) || [];
-  if (!feats.length){ showSuggest(kind === "search" ? `<div class="info">${ic("search", "s")}Nichts gefunden – z. B. „Hauptstraße 5, Lauf“</div>` : ""); return; }
+  if (!feats.length){ showSuggest(kind === "search" ? tx`<div class="info">${ic("search", "s")}Nichts gefunden – z. B. „Hauptstraße 5, Lauf“</div>` : ""); return; }
   const box = $("suggest"); box.innerHTML = "";
   feats.forEach(ft => {
     const d = document.createElement("div");
@@ -1018,8 +1223,8 @@ async function geocode(text, kind){
 // Bewusst gewählter Startpunkt (Adresse, 📍, Meine Standorte): startet eine neue Suche.
 // Die bisherigen Ergebnisse bleiben unter „🕘 Letzte Suchen“ erhalten.
 function chooseStart(lat, lng, label){
-  if (nav.active){ toast("Während der Navigation nicht möglich"); map.setView([lat, lng], 15); return; }
-  if (searching){ toast("Suche läuft noch …"); return; }
+  if (nav.active){ toast(tx`Während der Navigation nicht möglich`); map.setView([lat, lng], 15); return; }
+  if (searching){ toast(tx`Suche läuft noch …`); return; }
   if (edit.on) endEdit(true);
   if (draw.on) endDraw();
   const hadResults = results.length > 0;
@@ -1027,7 +1232,7 @@ function chooseStart(lat, lng, label){
   setLocked(false);
   setStart(lat, lng, label);
   map.setView([lat, lng], 15);
-  status(hadResults ? "Vorherige Runden: siehe „Verlauf“." : "");
+  status(hadResults ? tx`Vorherige Runden: siehe „Verlauf“.` : "");
 }
 
 /* ---------- Distanz ---------- */
@@ -1077,7 +1282,7 @@ function durText(r){
   const [a, b] = paceRange(), f = flatEquivalent(r) / 1000;
   const m1 = Math.round(f * a / 60), m2 = Math.round(f * b / 60);
   const h = m => Math.floor(m / 60) + ":" + String(m % 60).padStart(2, "0");
-  if (m2 < 60) return m1 === m2 ? `${m1} min` : `${m1}–${m2} min`;
+  if (m2 < 60) return m1 === m2 ? `${m1} min` : tx`${m1}–${m2} min`;
   return m1 === m2 ? `${h(m1)} h` : `${h(m1)}–${h(m2)} h`;
 }
 function showPace(){
@@ -1113,36 +1318,40 @@ function askKey(){
   });
 }
 $("setBtn").onclick = askKey;
+document.querySelectorAll('input[name=lang]').forEach(el => {
+  el.checked = el.value === langChoice();
+  el.onchange = () => { if (!el.checked) return; store.set("lang", el.value); location.reload(); };   // neu laden = alle Texte in der neuen Sprache
+});
 document.querySelectorAll('input[name=duck]').forEach(el => {
   el.checked = el.value === store.get("duckMode", "duck");
   el.onchange = () => { if (el.checked) store.set("duckMode", el.value); };
 });
 $("speakTest").onclick = async () => {
   const out = $("keyTestOut");
-  out.textContent = "Spiele Testansage … (am besten vorher Musik starten)";
-  const r = await speak("Das ist eine Testansage von Waldläufer. In 200 Metern rechts abbiegen.", true);
-  const mode = store.get("duckMode", "duck") === "pause" ? "pausieren" : "leiser stellen";
+  out.textContent = tx`Spiele Testansage … (am besten vorher Musik starten)`;
+  const r = await speak(tx`Das ist eine Testansage von Waldläufer. In 200 Metern rechts abbiegen.`, true);
+  const pauseMode = store.get("duckMode", "duck") === "pause", mode = pauseMode ? tx`pausieren` : tx`leiser stellen`;
   if (r.engine === "waldnative"){
-    out.textContent = `✅ Sprachausgabe über das Waldläufer-Modul (Modus: ${mode}).\n` +
-      (r.focus ? "Android hat den Audiofokus erteilt – andere Apps sollten jetzt " + (mode === "pausieren" ? "kurz pausieren." : "leiser werden.") +
-                 (mode === "leiser stellen" ? "\nWird die Musik kaum leiser? Dann „kurz pausieren“ wählen – manche Apps senken nur wenig ab." : "")
-               : "⚠ Android hat den Audiofokus verweigert (z. B. während eines Anrufs).");
+    out.textContent = tx`✅ Sprachausgabe über das Waldläufer-Modul (Modus: ${mode}).\n` +
+      (r.focus ? tx`Android hat den Audiofokus erteilt – andere Apps sollten jetzt ` + (pauseMode ? tx`kurz pausieren.` : tx`leiser werden.`) +
+                 (!pauseMode ? tx`\nWird die Musik kaum leiser? Dann „kurz pausieren“ wählen – manche Apps senken nur wenig ab.` : "")
+               : tx`⚠ Android hat den Audiofokus verweigert (z. B. während eines Anrufs).`);
   } else {
-    out.textContent = `⚠ Sprachausgabe über „${r.engine}“ – das Waldläufer-Modul fehlt, andere Apps werden nicht leiser.`;
+    out.textContent = tx`⚠ Sprachausgabe über „${r.engine}“ – das Waldläufer-Modul fehlt, andere Apps werden nicht leiser.`;
   }
 };
 
 // Diagnose: prüft Schlüssel, Rundkurs ohne und mit Wald-Gewichtung
 $("keyTest").onclick = async () => {
   const out = $("keyTestOut"), key = $("keyInput").value.trim() || BUILTIN_KEY;
-  if (!key){ out.textContent = "Bitte zuerst den Schlüssel einfügen."; return; }
+  if (!key){ out.textContent = tx`Bitte zuerst den Schlüssel einfügen.`; return; }
   const old = getKey(); if (key !== BUILTIN_KEY) store.set("orsKey", key);
   const c = start || map.getCenter();
   const lines = [];
   const log = t => { lines.push(t); out.textContent = lines.join("\n"); };
   log(usageText());
-  log(`Teste ab ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)} …`);
-  const tests = [["foot-walking", false, "Rundkurs normal"], ["foot-hiking", true, "Rundkurs Wald/grün"]];
+  log(tx`Teste ab ${c.lat.toFixed(4)}, ${c.lng.toFixed(4)} …`);
+  const tests = [["foot-walking", false, tx`Rundkurs normal`], ["foot-hiking", true, tx`Rundkurs Wald/grün`]];
   for (const [prof, nat, label] of tests){
     try {
       weightMode = 0;
@@ -1151,12 +1360,12 @@ $("keyTest").onclick = async () => {
       const secs = (performance.now() - t0) / 1000;
       const d = f ? f.properties.summary.distance / 1000 : 0;
       // Antwortzeit des Routendienstes (Netz + Server) – normal sind etwa 1–3 Sekunden
-      log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt · Antwort in ${secs.toFixed(1).replace(".", ",")} s${secs > 5 ? " ⚠ langsam (Routendienst oder Mobilfunk)" : ""}` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
+      log(tx`✅ ${label}: ${fmt(d)} km für 5 km angefragt · Antwort in ${fmt(secs)} s${secs > 5 ? tx` ⚠ langsam (Routendienst oder Mobilfunk)` : ""}` + (nat ? tx` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
     } catch(e){
       log(`❌ ${label}: ${e.message}`);
-      if (e.code === "quota") { log("→ Der Schlüssel ist in Ordnung. Meist ist nur das Minutenlimit (40 Anfragen/Min.) erreicht: 1–2 Minuten warten und erneut testen. Zeigt das openrouteservice-Dashboard bei „Directions V2“ 0 übrig, ist das Tageskontingent verbraucht."); break; }
-      if (e.code === "key") { log("→ Schlüssel prüfen: im openrouteservice-Dashboard kopieren und ohne Leerzeichen einfügen."); break; }
-      if (e.code === "rate") { log("→ Zu viele Anfragen in kurzer Zeit – 1 Minute warten und erneut testen."); break; }
+      if (e.code === "quota") { log(tx`→ Der Schlüssel ist in Ordnung. Meist ist nur das Minutenlimit (40 Anfragen/Min.) erreicht: 1–2 Minuten warten und erneut testen. Zeigt das openrouteservice-Dashboard bei „Directions V2“ 0 übrig, ist das Tageskontingent verbraucht.`); break; }
+      if (e.code === "key") { log(tx`→ Schlüssel prüfen: im openrouteservice-Dashboard kopieren und ohne Leerzeichen einfügen.`); break; }
+      if (e.code === "rate") { log(tx`→ Zu viele Anfragen in kurzer Zeit – 1 Minute warten und erneut testen.`); break; }
     }
     await sleep(1200);
   }
@@ -1188,20 +1397,20 @@ function countRequest(r){
 }
 function usageText(){
   const u = usage();
-  let t = `Heute verbraucht: ${u.n} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).`;
-  if (typeof u.remaining === "number" && isFinite(u.remaining)) t += `\nLaut Routendienst noch übrig: ${u.remaining}.`;
-  if (u.reset && u.reset > Date.now()) t += `\nKontingent wird zurückgesetzt: ${new Date(u.reset).toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}.`;
+  let t = tx`Heute verbraucht: ${u.n} Routen-Anfragen (kostenloses Limit: 2000 pro Tag).`;
+  if (typeof u.remaining === "number" && isFinite(u.remaining)) t += tx`\nLaut Routendienst noch übrig: ${u.remaining}.`;
+  if (u.reset && u.reset > Date.now()) t += tx`\nKontingent wird zurückgesetzt: ${new Date(u.reset).toLocaleString(LOCALE, { weekday: "short", hour: "2-digit", minute: "2-digit" })}.`;
   return t;
 }
 
 // openrouteservice antwortet mit 403 sowohl bei falschem Schlüssel als auch bei aufgebrauchtem Kontingent –
 // deshalb wird die Meldung des Servers ausgewertet und angezeigt.
 function orsError(status, msg){
-  const m = msg ? ` (Server: ${msg})` : "";
+  const m = msg ? tx` (Server: ${msg})` : "";
   if ((status === 403 || status === 429) && /quota|limit|exceed|rate/i.test(msg || ""))
-    return Object.assign(new Error("Kontingent des Routendienstes aufgebraucht" + m), { code: status === 429 ? "rate" : "quota" });
-  if (status === 401 || status === 403) return Object.assign(new Error("API-Schlüssel abgelehnt" + m), { code: "key" });
-  if (status === 429) return Object.assign(new Error("Zu viele Anfragen pro Minute" + m), { code: "rate" });
+    return Object.assign(new Error(tx`Kontingent des Routendienstes aufgebraucht` + m), { code: status === 429 ? "rate" : "quota" });
+  if (status === 401 || status === 403) return Object.assign(new Error(tx`API-Schlüssel abgelehnt` + m), { code: "key" });
+  if (status === 429) return Object.assign(new Error(tx`Zu viele Anfragen pro Minute` + m), { code: "rate" });
   return Object.assign(new Error(msg || ("HTTP " + status)), { code: "api", status });
 }
 
@@ -1217,7 +1426,7 @@ async function orsVia(profile, pts, nature, radiuses){
 async function orsPost(profile, nature, build){
   const w = nature ? WEIGHT_MODES[weightMode] : null;
   const body = Object.assign({ elevation: true, extra_info: useGreenExtra ? ["waytype", "surface", "green"] : ["waytype", "surface"],
-                               instructions: true, language: "de", units: "m" }, build());
+                               instructions: true, language: LANG, units: "m" }, build());
   if (w) body.options = Object.assign({}, body.options, { profile_params: { weightings: Object.assign({}, w) } });
   if (body.options && !Object.keys(body.options).length) delete body.options;
   let r;
@@ -1227,7 +1436,7 @@ async function orsPost(profile, nature, build){
       headers: { "Authorization": getKey(), "Content-Type": "application/json", "Accept": "application/geo+json, application/json" },
       body: JSON.stringify(body)
     });
-  } catch(e){ throw Object.assign(new Error("Keine Verbindung zum Routendienst (" + (e && e.message || e) + ")"), { code: "net" }); }
+  } catch(e){ throw Object.assign(new Error(tx`Keine Verbindung zum Routendienst (` + (e && e.message || e) + ")"), { code: "net" }); }
   countRequest(r);
   let j = null, msg = "";
   try {
@@ -1515,7 +1724,7 @@ async function buildViaRoute(pts, profile, nature, radius){
       await sleep(REQ_GAP_MS / 2);
     }
   }
-  if (!f) throw err || new Error("Keine Route");
+  if (!f) throw err || new Error(tx`Keine Route`);
   const C = f.geometry.coordinates, wp = (f.properties && f.properties.way_points) || [];
   const snapped = wp.slice(1, -1).map(ix => C[ix] ? [C[ix][1], C[ix][0]] : null);
   const r = analyse(mergeLegs(f));
@@ -1653,7 +1862,7 @@ let searching = false;
 async function search(){
   if (searching) return;
   if (nav.active) stopNav(true);   // laufende Navigation gehört zur alten Route
-  if (!start){ status("Zuerst Start auf der Karte tippen."); return; }
+  if (!start){ status(tx`Zuerst Start auf der Karte tippen.`); return; }
   if (edit.on) endEdit(true);
   if (draw.on) endDraw();
   if (!getKey()){ await askKey(); if (!getKey()) return; }
@@ -1666,8 +1875,8 @@ async function search(){
   let requests = 0, okCount = 0, errCount = 0, lastErr = "", stopped = "", rateWaits = 0;
   // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
   const phases = [
-    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 15 },
-    { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege", budget: 99 }
+    { profile: "foot-hiking",  nature: true,  label: tx`Suche Wald- und Feldwege`, budget: 15 },
+    { profile: "foot-walking", nature: false, label: tx`Erweitere Suche auf alle Wege`, budget: 99 }
   ];
   try {
     for (const ph of phases){
@@ -1681,7 +1890,7 @@ async function search(){
       // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
       while (!stopped && tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
         tries++; requests++;
-        status(`${ph.nature ? "Wald & Feld" : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
+        status(tx`${ph.nature ? "Wald & Feld" : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
         setProgress(requests / MAX_REQUESTS);
         const points = [5, 4, 6, 5, 7, 4][requests % 6];   // mehr Punkte = rundere Runde, weniger Hin-und-zurück
         const seed = Math.floor(Math.random() * 10000);
@@ -1695,13 +1904,13 @@ async function search(){
           // Darum erst eine Minute warten und es erneut versuchen – erst wenn es dann wieder kommt, ist der Tag aufgebraucht.
           if (e.code === "quota" || e.code === "rate"){
             if (++rateWaits > 2){ stopped = e.code; break; }
-            for (let sec = 65; sec > 0 && searching; sec--){ status(`Routendienst bremst (40/Min.) – weiter in ${sec} s · ${found.length} Runde${found.length === 1 ? "" : "n"}`); await sleep(1000); }
+            for (let sec = 65; sec > 0 && searching; sec--){ status(tx`Routendienst bremst (40/Min.) – weiter in ${sec} s · ${found.length} Runde${found.length === 1 ? "" : "n"}`); await sleep(1000); }
             requests--; tries--;   // dieser Versuch zählt nicht
             continue;
           }
-          if (e.code === "net"){ status(e.message + " – Internet prüfen."); return; }
+          if (e.code === "net"){ status(e.message + tx` – Internet prüfen.`); return; }
           // Bei 4 Fehlern ohne einen einzigen Erfolg abbrechen und den Grund zeigen
-          if (okCount === 0 && errCount >= 4){ status("Der Routendienst meldet einen Fehler: " + lastErr); return; }
+          if (okCount === 0 && errCount >= 4){ status(tx`Der Routendienst meldet einen Fehler: ` + lastErr); return; }
           await sleep(REQ_GAP_MS); continue;
         }
         if (f){
@@ -1725,18 +1934,18 @@ async function search(){
       }
       store.set(fKey, String(factor));
     }
-    const stopNote = stopped === "quota" ? "Routendienst lehnt ab (Kontingent). In ein paar Minuten erneut – Stand in den Einstellungen."
-                   : stopped === "key" ? lastErr + " – Einstellungen prüfen."
-                   : stopped === "rate" ? "Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen." : "";
-    if (stopped && !found.length && !near.length){ status(stopNote + (stopped === "quota" ? " " + lastErr.replace(/^Kontingent des Routendienstes aufgebraucht ?/, "") : "")); return; }
+    const stopNote = stopped === "quota" ? tx`Routendienst lehnt ab (Kontingent). In ein paar Minuten erneut – Stand in den Einstellungen.`
+                   : stopped === "key" ? lastErr + tx` – Einstellungen prüfen.`
+                   : stopped === "rate" ? tx`Der Routendienst bremst gerade (zu viele Anfragen). Bitte in ein paar Minuten nochmal suchen.` : "";
+    if (stopped && !found.length && !near.length){ status(stopNote + (stopped === "quota" ? " " + lastErr.replace(tx`Kontingent des Routendienstes aufgebraucht`, "").trim() : "")); return; }
     if (!found.length){
-      if (!okCount){ status("Der Routendienst hat keine Route geliefert" + (lastErr ? ": " + lastErr : ".")); return; }
+      if (!okCount){ status(tx`Der Routendienst hat keine Route geliefert` + (lastErr ? ": " + lastErr : ".")); return; }
       // Nichts im Toleranzbereich → die 3 nächstgelegenen trotzdem zeigen
       near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
       results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
       addHistory(target);
-      status(stopped ? stopNote + " Bisher: die nächstgelegenen Runden." : `Nichts mit ${fmt(target)} ±${TOL_KM} km – die nächstgelegenen Runden:`);
-    } else { addHistory(target); status(`${found.length} Runde${found.length > 1 ? "n" : ""} gefunden` + (stopped ? " · vorzeitig beendet: " + stopNote : "")); }
+      status(stopped ? stopNote + tx` Bisher: die nächstgelegenen Runden.` : tx`Nichts mit ${fmt(target)} ±${TOL_KM} km – die nächstgelegenen Runden:`);
+    } else { addHistory(target); status(tx`${found.length} Runde${found.length > 1 ? "n" : ""} gefunden` + (stopped ? tx` · vorzeitig beendet: ` + stopNote : "")); }
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
 }
 $("go").onclick = search;
@@ -1784,9 +1993,9 @@ function render(keepView){
       <div class="top">
         <span class="dot" style="background:${color}"></span>
         <span class="km">${fmt(r.distKm)} km</span>
-        <span class="kv" title="Laufzeit bei ${paceLabel()} min/km">${ic("timer")}${durText(r)}</span>
-        <span class="kv" title="Höhenmeter bergauf">${ic("mountain")}${r.ascent} m</span>
-        <span class="tags">${r.clean ? `<span class="tag" title="sauberer Rundkurs">${ic("loop")}</span>` : ""}${r.drawn ? `<span class="tag" title="nach deiner Skizze">${ic("gesture")}</span>` : ""}${r.edited ? `<span class="tag" title="von dir bearbeitet">${ic("edit")}</span>` : ""}</span>
+        <span class="kv" title="${tx`Laufzeit bei ${paceLabel()} min/km`}">${ic("timer")}${durText(r)}</span>
+        <span class="kv" title="${tx`Höhenmeter bergauf`}">${ic("mountain")}${r.ascent} m</span>
+        <span class="tags">${r.clean ? `<span class="tag" title="${tx`sauberer Rundkurs`}">${ic("loop")}</span>` : ""}${r.drawn ? `<span class="tag" title="${tx`nach deiner Skizze`}">${ic("gesture")}</span>` : ""}${r.edited ? `<span class="tag" title="${tx`von dir bearbeitet`}">${ic("edit")}</span>` : ""}</span>
       </div>
       <div class="bar">
         <span style="width:${pc(r.nature)}%;background:var(--c-nature)"></span>
@@ -1795,36 +2004,36 @@ function render(keepView){
         <span style="width:${pc(r.main)}%;background:var(--c-main)"></span>
       </div>
       <div class="stats legend">
-        <span title="Wald- und Feldwege" style="color:var(--c-nature)">${ic("tree")}${pc(r.nature)} %</span>
-        <span title="Nebenstraße / Gehweg">${ic("road")}${pc(r.street)} %</span>
-        <span title="Rad- / Asphaltweg" style="color:var(--c-cycle)">${ic("bike")}${pc(r.cycle)} %</span>
-        ${r.main >= 0.005 ? `<span title="Hauptstraße" style="color:var(--c-main)">${ic("warn")}${pc(r.main)} %</span>` : ""}
-        ${st && st.midM ? `<span title="mäßig steil (5–10 %)"><i class="sq" style="background:#f2c200"></i>${fmtDist(st.midM)}</span>` : ""}
-        ${st && st.highM ? `<span title="steil (über 10 %)"><i class="sq" style="background:#e0302b"></i>${fmtDist(st.highM)}</span>` : ""}
-        <span title="doppelt gelaufen">${ic("double")}${pc(r.overlap)} %</span>
-        <span title="Kreuzungen der eigenen Strecke">${ic("cross")}${r.crossCount}</span>
-        ${r.drawn && typeof r.sketchDev === "number" ? `<span title="mittlerer Abstand zu deiner Skizze">${ic("gesture")}≈${Math.round(r.sketchDev)} m</span>` : ""}
-        <span title="${r.clockwise ? "im Uhrzeigersinn" : "gegen den Uhrzeigersinn"}">${ic(r.clockwise ? "cw" : "ccw")}</span>
+        <span title="${tx`Wald- und Feldwege`}" style="color:var(--c-nature)">${ic("tree")}${pc(r.nature)} %</span>
+        <span title="${tx`Nebenstraße / Gehweg`}">${ic("road")}${pc(r.street)} %</span>
+        <span title="${tx`Rad- / Asphaltweg`}" style="color:var(--c-cycle)">${ic("bike")}${pc(r.cycle)} %</span>
+        ${r.main >= 0.005 ? `<span title="${tx`Hauptstraße`}" style="color:var(--c-main)">${ic("warn")}${pc(r.main)} %</span>` : ""}
+        ${st && st.midM ? `<span title="${tx`mäßig steil (5–10 %)`}"><i class="sq" style="background:#f2c200"></i>${fmtDist(st.midM)}</span>` : ""}
+        ${st && st.highM ? `<span title="${tx`steil (über 10 %)`}"><i class="sq" style="background:#e0302b"></i>${fmtDist(st.highM)}</span>` : ""}
+        <span title="${tx`doppelt gelaufen`}">${ic("double")}${pc(r.overlap)} %</span>
+        <span title="${tx`Kreuzungen der eigenen Strecke`}">${ic("cross")}${r.crossCount}</span>
+        ${r.drawn && typeof r.sketchDev === "number" ? `<span title="${tx`mittlerer Abstand zu deiner Skizze`}">${ic("gesture")}≈${Math.round(r.sketchDev)} m</span>` : ""}
+        <span title="${r.clockwise ? tx`im Uhrzeigersinn` : tx`gegen den Uhrzeigersinn`}">${ic(r.clockwise ? "cw" : "ccw")}</span>
       </div>
-      ${r.outside ? `<div class="hint">${ic("warn", "s")}${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km zur Wunschdistanz</div>` : ""}
-      ${r.spursRemoved ? `<div class="hint">${ic("scissors", "s")}${r.spursRemoved === 1 ? "1 Stichweg" : r.spursRemoved + " Stichwege"} entfernt</div>` : ""}
-      ${r.relaxed && !r.outside && !r.drawn ? `<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
+      ${r.outside ? tx`<div class="hint">${ic("warn", "s")}${r.dev > 0 ? "+" : "−"}${fmt(Math.abs(r.dev))} km zur Wunschdistanz</div>` : ""}
+      ${r.spursRemoved ? `<div class="hint">${ic("scissors", "s")}${r.spursRemoved === 1 ? tx`1 Stichweg entfernt` : tx`${r.spursRemoved} Stichwege entfernt`}</div>` : ""}
+      ${r.relaxed && !r.outside && !r.drawn ? tx`<div class="hint">${ic("road", "s")}nur mit mehr Straße möglich</div>` : ""}
       <div class="actions">
-        <button class="primary" data-a="run">${ic("play")}Start</button>
-        <button data-a="edit" class="txt" title="Punkte verschieben" aria-label="Anpassen">${ic("edit")}Anpassen</button>
-        <button data-a="rev" title="Richtung umkehren" aria-label="Umkehren">${ic("swap")}</button>
-        <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="Speichern" aria-label="Speichern">${ic("bookmark")}</button>
+        <button class="primary" data-a="run">${ic("play")}${tx`Start`}</button>
+        <button data-a="edit" class="txt" title="${tx`Punkte verschieben`}" aria-label="${tx`Anpassen`}">${ic("edit")}${tx`Anpassen`}</button>
+        <button data-a="rev" title="${tx`Richtung umkehren`}" aria-label="${tx`Umkehren`}">${ic("swap")}</button>
+        <button data-a="save" class="${isSaved(r) ? "on" : ""}" title="${tx`Speichern`}" aria-label="${tx`Speichern`}">${ic("bookmark")}</button>
       </div>`;
     c.onclick = (e) => {
       const btn = e.target.closest("button"), a = btn && btn.dataset.a;
       if (a === "run"){ const id = results[i].id; if (edit.on) endEdit(true); return startNav(results.find(x => x.id === id) || r); }
       if (a === "save"){ toggleSave(r); btn.classList.toggle("on", isSaved(r)); return; }
-      if (a === "edit"){ if (nav.active){ toast("Erst die Navigation beenden"); return; } return edit.on && edit.i === i ? endEdit(true) : startEdit(i); }
+      if (a === "edit"){ if (nav.active){ toast(tx`Erst die Navigation beenden`); return; } return edit.on && edit.i === i ? endEdit(true) : startEdit(i); }
       if (a === "rev"){
-        if (nav.active){ toast("Erst die Navigation beenden"); return; }
+        if (nav.active){ toast(tx`Erst die Navigation beenden`); return; }
         if (edit.on) endEdit(true);
         results[i] = reverseRoute(r); selected = i; render();
-        toast(results[i].clockwise ? "Im Uhrzeigersinn" : "Gegen den Uhrzeigersinn");
+        toast(results[i].clockwise ? tx`Im Uhrzeigersinn` : tx`Gegen den Uhrzeigersinn`);
         return;
       }
       select(i);
@@ -1973,11 +2182,11 @@ function saveList(k, list){
 function isSaved(r){ return loadList("saved").some(x => x.route.id === r.id); }
 function toggleSave(r){
   let list = loadList("saved");
-  if (list.some(x => x.route.id === r.id)){ list = list.filter(x => x.route.id !== r.id); saveList("saved", list); toast("Entfernt"); return; }
-  if (list.length >= MAX_SAVED){ toast(`Maximal ${MAX_SAVED} – erst eine unter „Gespeichert“ löschen`); return; }
+  if (list.some(x => x.route.id === r.id)){ list = list.filter(x => x.route.id !== r.id); saveList("saved", list); toast(tx`Entfernt`); return; }
+  if (list.length >= MAX_SAVED){ toast(tx`Maximal ${MAX_SAVED} – erst eine unter „Gespeichert“ löschen`); return; }
   list.unshift({ t: Date.now(), start: Object.assign({}, start), label: startLabel, route: packRoute(r) });
   const n = saveList("saved", list);
-  toast(n === list.length ? `Gespeichert (${n}/${MAX_SAVED})` : "Speicher voll");
+  toast(n === list.length ? tx`Gespeichert (${n}/${MAX_SAVED})` : tx`Speicher voll`);
 }
 
 function addHistory(target, drawn){
@@ -2003,9 +2212,9 @@ function restore(startPt, label, kmVal, routes, statusText){
 }
 
 function when(t){
-  const d = new Date(t), now = new Date(), hm = d.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(t), now = new Date(), hm = d.toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" });
   const days = Math.round((new Date(now.toDateString()) - new Date(d.toDateString())) / 864e5);
-  return days === 0 ? `heute ${hm}` : days === 1 ? `gestern ${hm}` : d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" }) + " " + hm;
+  return days === 0 ? tx`heute ${hm}` : days === 1 ? tx`gestern ${hm}` : d.toLocaleDateString(LOCALE, { day: "2-digit", month: "2-digit" }) + " " + hm;
 }
 const placeName = (label, st) => label ? escapeHtml(label) : `${st.lat.toFixed(4)}, ${st.lng.toFixed(4)}`;
 
@@ -2017,15 +2226,15 @@ function openDropdown(mode){
   const dd = $("dropdown"), list = loadList(mode === "hist" ? "history" : "saved");
   $("histBtn").classList.toggle("on", mode === "hist"); $("savedBtn").classList.toggle("on", mode === "saved");
   if (mode === "hist"){
-    dd.innerHTML = `<div class="head">${ic("history", "s")}VERLAUF ${list.length}/${MAX_HISTORY}</div>` + (list.length ? list.map((h, i) => `
+    dd.innerHTML = `<div class="head">${ic("history", "s")}${tx`VERLAUF`} ${list.length}/${MAX_HISTORY}</div>` + (list.length ? list.map((h, i) => `
       <div class="item" data-i="${i}">${ic(h.drawn ? "gesture" : "history")}<div class="t"><b>${placeName(h.label, h.start)}</b>
-        <small><span>${fmt(h.km)} km</span><span>· ${h.results.length} Runde${h.results.length === 1 ? "" : "n"}</span><span>· ${when(h.t)}</span></small></div>
-        <button class="del" data-del="${i}" aria-label="löschen">${ic("trash")}</button></div>`).join("") : `<div class="empty">Noch keine Suchen</div>`);
+        <small><span>${fmt(h.km)} km</span><span>· ${tx`${h.results.length} Runden`}</span><span>· ${when(h.t)}</span></small></div>
+        <button class="del" data-del="${i}" aria-label="${tx`löschen`}">${ic("trash")}</button></div>`).join("") : tx`<div class="empty">Noch keine Suchen</div>`);
   } else {
-    dd.innerHTML = `<div class="head">${ic("bookmark", "s")}GESPEICHERT ${list.length}/${MAX_SAVED}</div>` + (list.length ? list.map((x, i) => `
+    dd.innerHTML = `<div class="head">${ic("bookmark", "s")}${tx`GESPEICHERT`} ${list.length}/${MAX_SAVED}</div>` + (list.length ? list.map((x, i) => `
       <div class="item" data-i="${i}">${ic("bookmark")}<div class="t"><b>${fmt(x.route.distKm)} km · ${placeName(x.label, x.start)}</b>
         <small><span style="color:var(--c-nature)">${ic("tree", "xs")} ${Math.round(x.route.nature * 100)} %</span>${x.route.clean ? `<span>${ic("loop", "xs")}</span>` : ""}<span>${when(x.t)}</span></small></div>
-        <button class="del" data-del="${i}" aria-label="löschen">${ic("trash")}</button></div>`).join("") : `<div class="empty">${ic("bookmark")}<br>Noch nichts gespeichert</div>`);
+        <button class="del" data-del="${i}" aria-label="${tx`löschen`}">${ic("trash")}</button></div>`).join("") : tx`<div class="empty">${ic("bookmark")}<br>Noch nichts gespeichert</div>`);
   }
   dd.style.display = "block";
   if (sheetIdx !== 1) setSheet(1);   // Feld hochklappen, damit die Liste Platz hat
@@ -2036,8 +2245,8 @@ function openDropdown(mode){
     if (del){ cur.splice(+del.dataset.del, 1); saveList(key, cur); ddMode = ""; openDropdown(mode); if (mode === "saved") render(); return; }
     const it = e.target.closest(".item"); if (!it) return;
     const x = cur[+it.dataset.i]; if (!x) return;
-    if (mode === "hist") restore(x.start, x.label, x.km, x.results, `Suche von ${when(x.t)}`);
-    else restore(x.start, x.label, null, [x.route], "Gespeicherte Runde");
+    if (mode === "hist") restore(x.start, x.label, x.km, x.results, tx`Suche von ${when(x.t)}`);
+    else restore(x.start, x.label, null, [x.route], tx`Gespeicherte Runde`);
   };
 }
 $("histBtn").onclick = (e) => { e.stopPropagation(); openDropdown("hist"); };
@@ -2045,13 +2254,13 @@ $("savedBtn").onclick = (e) => { e.stopPropagation(); openDropdown("saved"); };
 document.addEventListener("click", e => { if (ddMode && !e.target.closest(".toolbar")) closeDropdown(); });
 
 $("newBtn").onclick = () => {
-  if (searching){ toast("Suche läuft noch …"); return; }
+  if (searching){ toast(tx`Suche läuft noch …`); return; }
   if (nav.active) stopNav(true);
   if (draw.on) endDraw();
   closeDropdown();
   clearRoutes();
   setLocked(false);
-  status("Start auf der Karte tippen, Standort nutzen oder Ort suchen.");
+  status(tx`Start auf der Karte tippen, Standort nutzen oder Ort suchen.`);
 };
 
 /* ---------- Meine Standorte ---------- */
@@ -2061,26 +2270,26 @@ function closeFavs(){ $("favs").style.display = "none"; }
 function openFavs(){
   showSuggest("");
   const box = $("favs"), list = placesList();
-  const defName = start ? (startLabel && startLabel !== "Mein Standort" ? startLabel.split(",")[0] : "") : "";
-  box.innerHTML = `<div class="head">${ic("place", "s")}MEINE STANDORTE ${list.length}/${MAX_PLACES}</div>` +
+  const defName = start ? (startLabel && startLabel !== tx`Mein Standort` ? startLabel.split(",")[0] : "") : "";
+  box.innerHTML = `<div class="head">${ic("place", "s")}${tx`MEINE STANDORTE`} ${list.length}/${MAX_PLACES}</div>` +
     (list.length ? list.map((p, i) => `<div class="item" data-i="${i}">${ic("place")}<div class="t"><b>${escapeHtml(p.name)}</b>
        <small>${p.label && p.label !== p.name ? escapeHtml(p.label) : p.lat.toFixed(5) + ", " + p.lng.toFixed(5)}</small></div>
        <button class="del" data-del="${i}" aria-label="löschen">${ic("trash")}</button></div>`).join("")
-      : '<div class="empty">Noch keine Standorte</div>') +
-    `<div class="add"><input id="favName" placeholder="${start ? "Name für den Startpunkt" : "Erst Start wählen"}" value="${escapeHtml(defName)}" ${start ? "" : "disabled"} maxlength="40">
-       <button id="favAdd" ${start ? "" : "disabled"} aria-label="Speichern">${ic("plus")}</button></div>`;
+      : tx`<div class="empty">Noch keine Standorte</div>`) +
+    `<div class="add"><input id="favName" placeholder="${start ? tx`Name für den Startpunkt` : tx`Erst Start wählen`}" value="${escapeHtml(defName)}" ${start ? "" : "disabled"} maxlength="40">
+       <button id="favAdd" ${start ? "" : "disabled"} aria-label="${tx`Speichern`}">${ic("plus")}</button></div>`;
   box.style.display = "block";
 }
 $("favBtn").onclick = (e) => { e.stopPropagation(); if ($("favs").style.display === "block") closeFavs(); else openFavs(); };
 $("favs").addEventListener("click", (e) => {
   e.stopPropagation();
   if (e.target.closest("#favAdd")){
-    const name = ($("favName").value || "").trim() || `Standort ${placesList().length + 1}`;
+    const name = ($("favName").value || "").trim() || tx`Standort ${placesList().length + 1}`;
     const list = placesList();
-    if (list.length >= MAX_PLACES){ toast(`Maximal ${MAX_PLACES} – erst einen löschen`); return; }
-    if (list.some(p => Math.abs(p.lat - start.lat) < 1e-5 && Math.abs(p.lng - start.lng) < 1e-5)){ toast("Schon gespeichert"); return; }
+    if (list.length >= MAX_PLACES){ toast(tx`Maximal ${MAX_PLACES} – erst einen löschen`); return; }
+    if (list.some(p => Math.abs(p.lat - start.lat) < 1e-5 && Math.abs(p.lng - start.lng) < 1e-5)){ toast(tx`Schon gespeichert`); return; }
     list.unshift({ name, lat: start.lat, lng: start.lng, label: startLabel || "", t: Date.now() });
-    saveList("places", list); toast(`„${name}“ gespeichert`); openFavs(); return;
+    saveList("places", list); toast(tx`„${name}“ gespeichert`); openFavs(); return;
   }
   const del = e.target.closest("[data-del]");
   if (del){ const list = placesList(); list.splice(+del.dataset.del, 1); saveList("places", list); openFavs(); return; }
@@ -2097,8 +2306,8 @@ function setMode(kind){
   if (!kind){ bar.style.display = "none"; return; }
   bar.style.display = "flex";
   $("modeText").innerHTML = kind === "edit"
-    ? `${ic("edit")}<span>Punkte ziehen<small>Kleine Punkte = neuer Punkt</small></span>`
-    : `${ic("draw")}<span>Runde zeichnen<small>Finger über die Karte ziehen</small></span>`;
+    ? tx`${ic("edit")}<span>Punkte ziehen<small>Kleine Punkte = neuer Punkt</small></span>`
+    : tx`${ic("draw")}<span>Runde zeichnen<small>Finger über die Karte ziehen</small></span>`;
   updateUndo();
 }
 function updateUndo(){
@@ -2187,7 +2396,7 @@ function drawHandles(){
     m.on("click", (e) => {
       L.DomEvent.stopPropagation(e);
       if (edit.busy) return;
-      if (edit.vias.length <= 1){ toast("Ein Punkt muss bleiben"); return; }
+      if (edit.vias.length <= 1){ toast(tx`Ein Punkt muss bleiben`); return; }
       pushUndo(); edit.vias.splice(k, 1); reroute();
     });
     edit.marks.push(m);
@@ -2226,7 +2435,7 @@ function editTap(ll){
   const p = [ll.lat, ll.lng], cum = r.cum || (r.cum = cumulative(r.coords));
   const near = nearestOnRoute(r.coords, cum, p);
   const mpp = 40075016 * Math.cos(p[0] * Math.PI / 180) / Math.pow(2, map.getZoom() + 8);
-  if (near.d > Math.max(20, 28 * mpp)){ toast("Auf die Linie tippen für einen neuen Punkt"); return; }
+  if (near.d > Math.max(20, 28 * mpp)){ toast(tx`Auf die Linie tippen für einen neuen Punkt`); return; }
   const vpos = edit.vias.map(q => nearestOnRoute(r.coords, cum, q).pos);
   let k = vpos.findIndex(v => v > near.pos); if (k < 0) k = edit.vias.length;
   pushUndo();
@@ -2236,7 +2445,7 @@ function editTap(ll){
 async function reroute(){
   if (edit.busy){ edit.pending = true; return; }
   if (!getKey()){ await askKey(); if (!getKey()) return; }
-  edit.busy = true; busy(true, "Runde wird angepasst …"); drawHandles();
+  edit.busy = true; busy(true, tx`Runde wird angepasst …`); drawHandles();
   const pts = [[start.lat, start.lng], ...edit.vias, [start.lat, start.lng]];
   const prev = results[edit.i];
   try {
@@ -2248,9 +2457,9 @@ async function reroute(){
     results[edit.i] = r; selected = edit.i;
   } catch(e){
     const u = edit.undo.pop(); if (u){ results[edit.i] = u.route; edit.vias = u.vias; }
-    toast(e.code === "key" ? "Schlüssel abgelehnt – Einstellungen prüfen"
-        : (e.code === "quota" || e.code === "rate") ? "Routendienst bremst – gleich nochmal"
-        : e.code === "net" ? "Keine Verbindung" : "Dort führt kein Weg hin – zurückgesetzt");
+    toast(e.code === "key" ? tx`Schlüssel abgelehnt – Einstellungen prüfen`
+        : (e.code === "quota" || e.code === "rate") ? tx`Routendienst bremst – gleich nochmal`
+        : e.code === "net" ? tx`Keine Verbindung` : tx`Dort führt kein Weg hin – zurückgesetzt`);
   } finally {
     edit.busy = false; busy(false);
     if (edit.on) render(true);
@@ -2264,8 +2473,8 @@ async function reroute(){
 // vielen Zwischenpunkten berechnet; die beste wird gezielt dort nachgebessert, wo sie von der Skizze abweicht.
 function accentColor(){ return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#1e7a46"; }
 function startDraw(){
-  if (nav.active){ toast("Erst die Navigation beenden"); return; }
-  if (searching){ toast("Suche läuft noch …"); return; }
+  if (nav.active){ toast(tx`Erst die Navigation beenden`); return; }
+  if (searching){ toast(tx`Suche läuft noch …`); return; }
   if (edit.on) endEdit(true);
   closeDropdown(); showSuggest(""); closeFavs();
   Object.assign(draw, { on: true, pts: [], strokes: [], down: false });
@@ -2316,8 +2525,8 @@ $("drawBtn").onclick = (e) => { e.stopPropagation(); draw.on ? endDraw() : start
 function finishDraw(){
   const pts = draw.pts.slice();
   let len = 0; for (let k = 1; k < pts.length; k++) len += haversine(pts[k-1], pts[k]);
-  if (pts.length < 3 || len < 400){ toast("Bitte eine längere Strecke zeichnen"); return; }
-  if (len > 60000){ toast("Zu lang – bitte näher heranzoomen und neu zeichnen"); drawUndo(); return; }
+  if (pts.length < 3 || len < 400){ toast(tx`Bitte eine längere Strecke zeichnen`); return; }
+  if (len > 60000){ toast(tx`Zu lang – bitte näher heranzoomen und neu zeichnen`); drawUndo(); return; }
   endDraw();
   sketchSearch(pts);
 }
@@ -2326,7 +2535,7 @@ async function sketchSearch(pts){
   if (nav.active) stopNav(true);
   if (!getKey()){ await askKey(); if (!getKey()) return; }
   const first = pts[0];
-  if (!start || haversine([start.lat, start.lng], first) > 1000){ setLocked(false); setStart(first[0], first[1], "Beginn der Skizze"); }
+  if (!start || haversine([start.lat, start.lng], first) > 1000){ setLocked(false); setStart(first[0], first[1], tx`Beginn der Skizze`); }
   searching = true; $("go").disabled = true; closeDropdown();
   clearRoutes(); results = []; setLocked(true);
   draw.sketch = L.polyline(pts, { color: accentColor(), weight: 4, opacity: 0.75, dashArray: "2 9", lineCap: "round", interactive: false }).addTo(map);
@@ -2342,10 +2551,10 @@ async function sketchSearch(pts){
     return out.slice(0, 45);
   };
   const variants = [
-    { sp: Math.max(220, len / 22), nature: true,  rad: 150, profile: "foot-hiking",  label: "Eng an der Skizze" },
-    { sp: Math.max(300, len / 12), nature: true,  rad: 300, profile: "foot-hiking",  label: "Mehr Wald & Feld" },
-    { sp: Math.max(450, len / 7),  nature: true,  rad: 500, profile: "foot-hiking",  label: "Freier geführt" },
-    { sp: Math.max(300, len / 12), nature: false, rad: 200, profile: "foot-walking", label: "Alle Wege" }
+    { sp: Math.max(220, len / 22), nature: true,  rad: 150, profile: "foot-hiking",  label: tx`Eng an der Skizze` },
+    { sp: Math.max(300, len / 12), nature: true,  rad: 300, profile: "foot-hiking",  label: tx`Mehr Wald & Feld` },
+    { sp: Math.max(450, len / 7),  nature: true,  rad: 500, profile: "foot-hiking",  label: tx`Freier geführt` },
+    { sp: Math.max(300, len / 12), nature: false, rad: 200, profile: "foot-walking", label: tx`Alle Wege` }
   ];
   const found = []; let done = 0, lastErr = "", stop = false;
   const TOTAL = variants.length + 5;
@@ -2383,7 +2592,7 @@ async function sketchSearch(pts){
       const flush = () => { if (grp.length){ adds.push(grp.reduce((a, b) => b[1] > a[1] ? b : a)[0]); grp = []; } };
       far.forEach((x, j) => { if (j && x[0] - far[j-1][0] > 2) flush(); grp.push(x); }); flush();
       const idx = [...new Set([...best._vk, ...adds])].sort((a, b) => a - b).slice(0, 45);
-      const r = await tryRoute(idx, Object.assign({}, best._v, { rad: Math.min(best._v.rad, 150) }), "Verfeinere");
+      const r = await tryRoute(idx, Object.assign({}, best._v, { rad: Math.min(best._v.rad, 150) }), tx`Verfeinere`);
       if (!r || r.sketchDev >= best.sketchDev - 3) break;
     }
     // Aufräumen: Zwischenpunkte, die doppelte Abschnitte oder Kreuzungen verursachen, weglassen
@@ -2399,15 +2608,15 @@ async function sketchSearch(pts){
       });
       if (!bad.size || bad.size >= vias.length) break;
       const keepIdx = vias.map((v, k) => k).filter(k => !bad.has(k));
-      const r = await tryPts(keepIdx.map(k => vias[k]), best._vk, best._v, "Räume auf");
+      const r = await tryPts(keepIdx.map(k => vias[k]), best._vk, best._v, tx`Räume auf`);
       if (!r || drawnKey(r) >= drawnKey(best) - 5) break;
     }
-    if (!found.length){ status("Keine Runde entlang der Skizze gefunden" + (lastErr ? ": " + lastErr : "")); return; }
+    if (!found.length){ status(tx`Keine Runde entlang der Skizze gefunden` + (lastErr ? ": " + lastErr : "")); return; }
     results = keep(found); sortMode = "near"; selected = -1; render(); select(0);
     addHistory(Math.round(results[0].distKm * 2) / 2, true);
-    status(`${results.length} Variante${results.length === 1 ? "" : "n"} nach deiner Skizze`);
+    status(tx`${results.length} Variante${results.length === 1 ? "" : "n"} nach deiner Skizze`);
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
-  if (results.length && !nav.active){ startEdit(0); toast("Punkte ziehen zum Anpassen · ✓ wenn fertig"); }
+  if (results.length && !nav.active){ startEdit(0); toast(tx`Punkte ziehen zum Anpassen · ✓ wenn fertig`); }
 }
 
 /* ---------- Erinnerungsbild nach dem Lauf ---------- */
@@ -2419,13 +2628,13 @@ function snapshotRun(){
   const track = nav.track && nav.track.length >= 10 ? nav.track.slice() : r.coords.slice();
   const dist = nav.ran > 200 ? nav.ran : total;
   const secs = nav.t0 ? Math.max(60, (Date.now() - nav.t0) / 1000) : flatEquivalent(r) / 1000 * paceMid();
-  return { track, dist, secs, label: startLabel && startLabel !== "Mein Standort" ? startLabel.split(",")[0] : "", date: new Date() };
+  return { track, dist, secs, label: startLabel && startLabel !== tx`Mein Standort` ? startLabel.split(",")[0] : "", date: new Date() };
 }
 function offerPhoto(run){
   if (!run || $("runModal").style.display === "flex") return;
   lastRun = run;
   const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
-  $("runStats").innerHTML = `${ic("flag", "s")} ${fmt(run.dist / 1000)} km &nbsp; ${ic("timer", "s")} ${m}:${String(sec).padStart(2, "0")} min &nbsp; ${fmtPace(run.secs / (run.dist / 1000))} /km`;
+  $("runStats").innerHTML = tx`${ic("flag", "s")} ${fmt(run.dist / 1000)} km &nbsp; ${ic("timer", "s")} ${m}:${String(sec).padStart(2, "0")} min &nbsp; ${fmtPace(run.secs / (run.dist / 1000))} /km`;
   $("runModal").style.display = "flex";
 }
 $("runPhoto").onclick = () => { $("runModal").style.display = "none"; openCamera(); };
@@ -2438,7 +2647,7 @@ async function openCamera(){
   if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) return pickPhoto();
   try {
     camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: camFacing, width: { ideal: 1920 }, height: { ideal: 1920 } }, audio: false });
-  } catch(e){ toast("Kamera nicht verfügbar – Berechtigung prüfen"); return pickPhoto(); }
+  } catch(e){ toast(tx`Kamera nicht verfügbar – Berechtigung prüfen`); return pickPhoto(); }
   const v = $("camVideo"); v.srcObject = camStream; v.style.transform = camFacing === "user" ? "scaleX(-1)" : "none";
   $("cam").style.display = "block";
   try { await v.play(); } catch(e){}
@@ -2493,7 +2702,7 @@ function renderShot(run, photo, layout){
   const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
   const hours = m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
   const stats = [[fmt(run.dist / 1000), " km", 104], [hours, m >= 60 ? " h" : " min", 58], [fmtPace(run.secs / (run.dist / 1000)), " /km", 44]];
-  const where = [run.label, run.date.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" })].filter(Boolean).join(" · ");
+  const where = [run.label, run.date.toLocaleDateString(LOCALE, { day: "numeric", month: "long", year: "numeric" })].filter(Boolean).join(" · ");
   const text = (t, x, y, size, weight, align, alpha) => {
     g.save(); g.font = `${weight} ${size}px Roboto, "Google Sans", system-ui, sans-serif`; g.textAlign = align; g.fillStyle = `rgba(255,255,255,${alpha ?? 1})`;
     g.shadowColor = "rgba(0,0,0,.5)"; g.shadowBlur = 10; g.fillText(t, x, y); g.restore();
@@ -2557,17 +2766,17 @@ const shotName = () => `waldlaeufer-${new Date().toISOString().slice(0, 16).repl
 $("shotShare").onclick = async () => {
   const S = plug("Share");
   try {
-    if (S){ const uri = await shotFile("CACHE", shotName()); await S.share({ title: "Meine Laufrunde", files: [uri] }); return; }
+    if (S){ const uri = await shotFile("CACHE", shotName()); await S.share({ title: tx`Meine Laufrunde`, files: [uri] }); return; }
     const blob = await (await fetch(shot.url)).blob(), file = new File([blob], shotName(), { type: "image/jpeg" });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: "Meine Laufrunde" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) return navigator.share({ files: [file], title: tx`Meine Laufrunde` });
     $("shotSave").onclick();
-  } catch(e){ if (!/cancel/i.test(String(e && e.message))) toast("Teilen nicht möglich"); }
+  } catch(e){ if (!/cancel/i.test(String(e && e.message))) toast(tx`Teilen nicht möglich`); }
 };
 $("shotSave").onclick = async () => {
   try {
-    if (plug("Filesystem")){ await shotFile("DOCUMENTS", "Waldlaeufer/" + shotName()); toast("Gespeichert in Dokumente/Waldlaeufer"); return; }
+    if (plug("Filesystem")){ await shotFile("DOCUMENTS", "Waldlaeufer/" + shotName()); toast(tx`Gespeichert in Dokumente/Waldlaeufer`); return; }
     const a = document.createElement("a"); a.href = shot.url; a.download = shotName(); document.body.appendChild(a); a.click(); a.remove();
-  } catch(e){ toast("Speichern nicht möglich – bitte „Teilen“ nutzen"); }
+  } catch(e){ toast(tx`Speichern nicht möglich – bitte „Teilen“ nutzen`); }
 };
 
 /* ---------- Helfer ---------- */
@@ -2576,7 +2785,7 @@ document.querySelectorAll("a[target=_blank]").forEach(a => a.addEventListener("c
 function status(t){ $("status").textContent = t; }
 function setProgress(v){ $("prog").style.display = v > 0 ? "block" : "none"; $("prog").firstElementChild.style.width = Math.round(v * 100) + "%"; }
 function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-function fmt(v){ return v.toFixed(1).replace(".", ","); }
+function fmt(v){ return LANG === "en" ? v.toFixed(1) : v.toFixed(1).replace(".", ","); }
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
 
 // Testzugang für automatische Tests
