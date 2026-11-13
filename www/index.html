@@ -396,8 +396,8 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
     <h2><svg class="i"><use href="#i-timer"/></svg>Lauftempo</h2>
     <div class="pacebox"><span id="paceShow">5:30</span><small>min/km</small></div>
     <div class="dual"><div class="track"><div class="fill" id="paceFill"></div></div>
-      <input type="range" id="paceA" min="180" max="540" step="5" aria-label="Lauftempo"></div>
-    <div class="dual-lab"><span>schnell · 3:00</span><span>9:00 · gemütlich</span></div>
+      <input type="range" id="paceA" min="180" max="900" step="5" aria-label="Lauftempo"></div>
+    <div class="dual-lab"><span>schnell · 3:00</span><span>15:00 · wandern</span></div>
     <p style="margin-top:14px;display:flex;gap:8px;align-items:flex-start"><svg class="i s" style="margin-top:2px"><use href="#i-mountain"/></svg><span>Die Laufzeit berücksichtigt Steigungen: bergauf langsamer, leicht bergab etwas schneller.</span></p>
     <div class="btns"><button class="primary" id="paceOk">Fertig</button></div>
   </div>
@@ -1080,7 +1080,7 @@ function durText(r){
   return m1 === m2 ? `${h(m1)} h` : `${h(m1)}–${h(m2)} h`;
 }
 function showPace(){
-  const a = +$("paceA").value, f = v => (v - 180) / (540 - 180) * 100;
+  const a = +$("paceA").value, f = v => (v - 180) / (900 - 180) * 100;
   $("paceFill").style.left = "0%"; $("paceFill").style.right = (100 - f(a)) + "%";
   $("paceShow").textContent = fmtPace(a);
 }
