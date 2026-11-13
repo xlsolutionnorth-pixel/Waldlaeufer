@@ -363,7 +363,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
         <div class="lab"><input id="km" type="number" inputmode="decimal" min="1" max="60" step="0.5" value="8"><small>km</small></div>
         <button id="plus" aria-label="mehr"><svg class="i"><use href="#i-plus"/></svg></button>
       </div>
-      <button class="pace" id="paceBtn" aria-label="Lauftempo"><b><svg class="i s"><use href="#i-timer"/></svg><span id="paceTxt">5:00–6:00</span></b><small>min/km</small></button>
+      <button class="pace" id="paceBtn" aria-label="Lauftempo"><b><svg class="i s"><use href="#i-timer"/></svg><span id="paceTxt">5:30</span></b><small>min/km</small></button>
       <button class="go" id="go" aria-label="Routen suchen"><svg class="i"><use href="#i-search"/></svg></button>
     </div>
     <div class="progress" id="prog"><i></i></div>
@@ -394,10 +394,9 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
 <div class="modal" id="paceModal">
   <div class="box">
     <h2><svg class="i"><use href="#i-timer"/></svg>Lauftempo</h2>
-    <div class="pacebox"><span id="paceShow">5:00–6:00</span><small>min/km</small></div>
+    <div class="pacebox"><span id="paceShow">5:30</span><small>min/km</small></div>
     <div class="dual"><div class="track"><div class="fill" id="paceFill"></div></div>
-      <input type="range" id="paceA" min="180" max="540" step="5" aria-label="schnellstes Tempo">
-      <input type="range" id="paceB" min="180" max="540" step="5" aria-label="langsamstes Tempo"></div>
+      <input type="range" id="paceA" min="180" max="540" step="5" aria-label="Lauftempo"></div>
     <div class="dual-lab"><span>schnell · 3:00</span><span>9:00 · gemütlich</span></div>
     <p style="margin-top:14px;display:flex;gap:8px;align-items:flex-start"><svg class="i s" style="margin-top:2px"><use href="#i-mountain"/></svg><span>Die Laufzeit berücksichtigt Steigungen: bergauf langsamer, leicht bergab etwas schneller.</span></p>
     <div class="btns"><button class="primary" id="paceOk">Fertig</button></div>
@@ -1038,12 +1037,16 @@ $("km").value = store.get("km", "8");
 $("km").onchange = () => store.set("km", km());
 
 /* ---------- Lauftempo & Laufzeit ---------- */
-// Tempo als Spanne in Sekunden pro km (z. B. 5:00–6:00). Die Laufzeit rechnet Steigungen mit ein.
-function paceRange(){
-  let a = Number(store.get("paceA", "300")), b = Number(store.get("paceB", "360"));
-  if (!(a >= 120 && a <= 900)) a = 300; if (!(b >= 120 && b <= 900)) b = 360;
-  return [Math.min(a, b), Math.max(a, b)];
+// Ein festes Tempo in Sekunden pro km (z. B. 5:30). Die Laufzeit rechnet Steigungen mit ein.
+function paceValue(){
+  let p = Number(store.get("pace", ""));
+  if (!(p >= 120 && p <= 900)){   // frühere Einstellung "von–bis" → Mittelwert übernehmen
+    const a = Number(store.get("paceA", "300")), b = Number(store.get("paceB", "360"));
+    p = (a >= 120 && b >= 120) ? Math.round((a + b) / 2 / 5) * 5 : 330;
+  }
+  return p;
 }
+function paceRange(){ const p = paceValue(); return [p, p]; }
 function paceMid(){ const [a, b] = paceRange(); return (a + b) / 2; }
 function fmtPace(sec){ sec = Math.round(sec); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }
 function paceLabel(){ const [a, b] = paceRange(); return a === b ? fmtPace(a) : `${fmtPace(a)}–${fmtPace(b)}`; }
@@ -1077,19 +1080,15 @@ function durText(r){
   return m1 === m2 ? `${h(m1)} h` : `${h(m1)}–${h(m2)} h`;
 }
 function showPace(){
-  const a = +$("paceA").value, b = +$("paceB").value;
-  const mn = 180, mx = 540, f = v => (v - mn) / (mx - mn) * 100;
-  $("paceFill").style.left = f(Math.min(a, b)) + "%"; $("paceFill").style.right = (100 - f(Math.max(a, b))) + "%";
-  // liegt der linke Regler ganz rechts, muss er oben liegen, damit man ihn wieder greifen kann
-  $("paceA").style.zIndex = a >= mx - 20 ? 3 : 1; $("paceB").style.zIndex = 2;
-  $("paceShow").textContent = Math.min(a, b) === Math.max(a, b) ? fmtPace(a) : `${fmtPace(Math.min(a, b))}–${fmtPace(Math.max(a, b))}`;
+  const a = +$("paceA").value, f = v => (v - 180) / (540 - 180) * 100;
+  $("paceFill").style.left = "0%"; $("paceFill").style.right = (100 - f(a)) + "%";
+  $("paceShow").textContent = fmtPace(a);
 }
 $("paceTxt").textContent = paceLabel();
-$("paceBtn").onclick = () => { const [a, b] = paceRange(); $("paceA").value = a; $("paceB").value = b; showPace(); $("paceModal").style.display = "flex"; };
-$("paceA").oninput = () => { if (+$("paceA").value > +$("paceB").value) $("paceB").value = $("paceA").value; showPace(); };
-$("paceB").oninput = () => { if (+$("paceB").value < +$("paceA").value) $("paceA").value = $("paceB").value; showPace(); };
+$("paceBtn").onclick = () => { $("paceA").value = paceValue(); showPace(); $("paceModal").style.display = "flex"; };
+$("paceA").oninput = showPace;
 $("paceOk").onclick = () => {
-  store.set("paceA", $("paceA").value); store.set("paceB", $("paceB").value);
+  store.set("pace", $("paceA").value);
   $("paceTxt").textContent = paceLabel(); $("paceModal").style.display = "none";
   if (results.length) render(true);
 };
