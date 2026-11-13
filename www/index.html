@@ -1140,9 +1140,12 @@ $("keyTest").onclick = async () => {
   for (const [prof, nat, label] of tests){
     try {
       weightMode = 0;
+      const t0 = performance.now();
       const f = await orsRoundTrip(prof, 5000, 4, 1, nat, { lat: c.lat, lng: c.lng });
+      const secs = (performance.now() - t0) / 1000;
       const d = f ? f.properties.summary.distance / 1000 : 0;
-      log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
+      // Antwortzeit des Routendienstes (Netz + Server) – normal sind etwa 1–3 Sekunden
+      log(`✅ ${label}: ${fmt(d)} km für 5 km angefragt · Antwort in ${secs.toFixed(1).replace(".", ",")} s${secs > 5 ? " ⚠ langsam (Routendienst oder Mobilfunk)" : ""}` + (nat ? ` (Gewichtung: ${JSON.stringify(WEIGHT_MODES[weightMode]) || "ohne"})` : ""));
     } catch(e){
       log(`❌ ${label}: ${e.message}`);
       if (e.code === "quota") { log("→ Der Schlüssel ist in Ordnung. Meist ist nur das Minutenlimit (40 Anfragen/Min.) erreicht: 1–2 Minuten warten und erneut testen. Zeigt das openrouteservice-Dashboard bei „Directions V2“ 0 übrig, ist das Tageskontingent verbraucht."); break; }
