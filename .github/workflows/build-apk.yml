@@ -48,16 +48,17 @@ jobs:
         run: npm install
 
       # Nur für die Tester-Version: eigener Name und eigene Kennung (läuft neben der normalen App),
-      # Schlüssel aus dem Secret ORS_API_KEY einbauen. Die normale App bleibt ohne Schlüssel.
+      # Schlüssel aus dem Secret TESTER_ORS_API_KEY einbauen (eigenes openrouteservice-Konto nur für Tester –
+      # lässt sich dort jederzeit löschen, dann funktioniert die Suche in allen Tester-Apps nicht mehr). Die normale App bleibt ohne Schlüssel.
       - name: Tester-Version vorbereiten
         if: github.event.inputs.variante == 'tester'
         env:
-          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+          ORS_API_KEY: ${{ secrets.TESTER_ORS_API_KEY }}
           KS: ${{ secrets.TESTER_KEYSTORE }}
           KSPW: ${{ secrets.TESTER_KEYSTORE_PASSWORD }}
         run: |
           missing=""
-          [ -n "$ORS_API_KEY" ] || missing="$missing ORS_API_KEY"
+          [ -n "$ORS_API_KEY" ] || missing="$missing TESTER_ORS_API_KEY"
           [ -n "$KS" ] || missing="$missing TESTER_KEYSTORE"
           [ -n "$KSPW" ] || missing="$missing TESTER_KEYSTORE_PASSWORD"
           [ -z "$missing" ] || { echo "::error::Für die Tester-Version fehlen die Secrets:$missing"; exit 1; }

@@ -1097,7 +1097,7 @@ $("paceModal").onclick = e => { if (e.target.id === "paceModal") $("paceOk").onc
 
 /* ---------- API-Schlüssel ---------- */
 // Eingebauter Schlüssel: bleibt in der normalen App leer. Nur beim Bau der Tester-Version
-// („Waldläufer Tester“) setzt GitHub hier den Schlüssel aus dem Secret ORS_API_KEY ein.
+// („Waldläufer Tester“) setzt GitHub hier den Schlüssel aus dem Secret TESTER_ORS_API_KEY ein.
 const BUILTIN_KEY = "";
 function getKey(){ return store.get("orsKey", "").trim() || BUILTIN_KEY; }
 function askKey(){
