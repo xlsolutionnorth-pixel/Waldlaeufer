@@ -9,6 +9,12 @@ on:
       - '.github/workflows/quota-watch.yml'
       - '*.md'
   workflow_dispatch:
+    inputs:
+      variante:
+        description: 'Welche App bauen? normal = ohne Schlüssel · tester = „Waldläufer Tester“ mit eingebautem Schlüssel und fester Signatur'
+        type: choice
+        options: [normal, tester]
+        default: normal
 
 # Schreibrecht, damit die fertige APK als Release veröffentlicht werden kann
 permissions:
@@ -40,6 +46,33 @@ jobs:
 
       - name: Abhängigkeiten installieren
         run: npm install
+
+      # Nur für die Tester-Version: eigener Name und eigene Kennung (läuft neben der normalen App),
+      # Schlüssel aus dem Secret ORS_API_KEY einbauen. Die normale App bleibt ohne Schlüssel.
+      - name: Tester-Version vorbereiten
+        if: github.event.inputs.variante == 'tester'
+        env:
+          ORS_API_KEY: ${{ secrets.ORS_API_KEY }}
+          KS: ${{ secrets.TESTER_KEYSTORE }}
+          KSPW: ${{ secrets.TESTER_KEYSTORE_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$ORS_API_KEY" ] || missing="$missing ORS_API_KEY"
+          [ -n "$KS" ] || missing="$missing TESTER_KEYSTORE"
+          [ -n "$KSPW" ] || missing="$missing TESTER_KEYSTORE_PASSWORD"
+          [ -z "$missing" ] || { echo "::error::Für die Tester-Version fehlen die Secrets:$missing"; exit 1; }
+          python3 - <<'PY2'
+          import json, os
+          c = json.load(open("capacitor.config.json"))
+          c["appId"] = "de.waldlaeufer.tester"; c["appName"] = "Waldläufer Tester"
+          json.dump(c, open("capacitor.config.json", "w"), ensure_ascii=False, indent=2)
+          p = "www/index.html"; s = open(p, encoding="utf-8").read()
+          a = 'const BUILTIN_KEY = "";'
+          assert s.count(a) == 1, "Platzhalter für den Schlüssel nicht gefunden"
+          s = s.replace(a, "const BUILTIN_KEY = " + json.dumps(os.environ["ORS_API_KEY"].strip()) + ";")
+          open(p, "w", encoding="utf-8").write(s)
+          print("Tester-Version: Name und Kennung gesetzt, Schlüssel eingebaut")
+          PY2
 
       - name: Android-Projekt erzeugen
         env:
@@ -90,12 +123,30 @@ jobs:
           GRADLE
           sed -i 's/^          //' ~/.gradle/init.d/central-spiegel.gradle
           cat $P
-          for i in 1 2 3; do ./gradlew assembleDebug --no-daemon && break; echo "Versuch $i fehlgeschlagen – neuer Versuch in 20 s"; sleep 20; [ $i = 3 ] && exit 1; done
+          TASK=assembleDebug; [ "${{ github.event.inputs.variante }}" = "tester" ] && TASK=assembleRelease
+          for i in 1 2 3; do ./gradlew $TASK --no-daemon && break; echo "Versuch $i fehlgeschlagen – neuer Versuch in 20 s"; sleep 20; [ $i = 3 ] && exit 1; done
 
       - name: APK umbenennen
+        if: github.event.inputs.variante != 'tester'
         run: cp android/app/build/outputs/apk/debug/app-debug.apk Waldlaeufer.apk
 
+      # Tester-Version: mit dem festen eigenen Schlüssel signieren (gleicher Schlüssel bei jedem Bau →
+      # Updates lassen sich einfach drüberinstallieren; später auch als Upload-Schlüssel für Google Play nutzbar)
+      - name: Tester-APK signieren
+        if: github.event.inputs.variante == 'tester'
+        env:
+          KS: ${{ secrets.TESTER_KEYSTORE }}
+          KSPW: ${{ secrets.TESTER_KEYSTORE_PASSWORD }}
+        run: |
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          echo "$KS" | base64 -d > tester.keystore
+          "$BT/zipalign" -f -p 4 android/app/build/outputs/apk/release/app-release-unsigned.apk aligned.apk
+          "$BT/apksigner" sign --ks tester.keystore --ks-pass env:KSPW --ks-key-alias waldlaeufer --out Waldlaeufer-Tester.apk aligned.apk
+          "$BT/apksigner" verify --print-certs Waldlaeufer-Tester.apk | grep -i "SHA-256" | head -1
+          rm -f tester.keystore aligned.apk
+
       - uses: actions/upload-artifact@v4
+        if: github.event.inputs.variante != 'tester'
         continue-on-error: true   # fällt der Artefakt-Dienst von GitHub aus, wird die APK trotzdem als Release veröffentlicht
         with:
           name: Waldlaeufer-APK
@@ -104,7 +155,20 @@ jobs:
       # Hauptzweig: APK als Release ("latest") veröffentlichen.
       # Fester Download-Link: https://github.com/<konto>/<repo>/releases/latest/download/Waldlaeufer.apk
       # Andere Zweige: als Vorabversion (Pre-release) – ändert den festen Link nicht.
+      # Tester-Version enthält den Schlüssel → NICHT öffentlich, nur als Entwurf (nur für dich sichtbar)
+      - name: Tester-APK als privaten Entwurf ablegen
+        if: github.event.inputs.variante == 'tester'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          gh release create "tester-${VERSION}-build${{ github.run_number }}" Waldlaeufer-Tester.apk \
+            --title "Waldläufer Tester ${VERSION} (Build ${{ github.run_number }}) – mit Schlüssel, nicht veröffentlichen" \
+            --notes "Enthält den openrouteservice-Schlüssel. Nur gezielt an Tester weitergeben." \
+            --draft --target "${GITHUB_SHA}"
+
       - name: APK als Release veröffentlichen
+        if: github.event.inputs.variante != 'tester'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

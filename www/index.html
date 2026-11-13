@@ -455,6 +455,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
     <button id="speakTest" class="wide"><svg class="i"><use href="#i-play"/></svg>Ansage testen</button>
     <h3><svg class="i s"><use href="#i-key"/></svg>ROUTENDIENST (OPENROUTESERVICE)</h3>
     <input id="keyInput" placeholder="API-Schlüssel einfügen" autocomplete="off" spellcheck="false">
+    <p id="keyBuiltin" style="display:none;gap:8px;align-items:center;margin:4px 2px 0"><svg class="i s"><use href="#i-check"/></svg>Schlüssel ist in dieser Tester-Version eingebaut.</p>
     <p style="margin:6px 2px 0;font-size:12.5px">Kostenlos unter <a href="https://openrouteservice.org/dev/#/signup" target="_blank" rel="noopener">openrouteservice.org/dev</a></p>
     <button id="keyTest" class="wide"><svg class="i"><use href="#i-plug"/></svg>Verbindung testen</button>
     <pre id="keyTestOut" style="white-space:pre-wrap;font-size:12px;color:var(--muted);margin:8px 0 0;max-height:26vh;overflow:auto"></pre>
@@ -1095,14 +1096,19 @@ $("paceOk").onclick = () => {
 $("paceModal").onclick = e => { if (e.target.id === "paceModal") $("paceOk").onclick(); };
 
 /* ---------- API-Schlüssel ---------- */
-function getKey(){ return store.get("orsKey", "").trim(); }
+// Eingebauter Schlüssel: bleibt in der normalen App leer. Nur beim Bau der Tester-Version
+// („Waldläufer Tester“) setzt GitHub hier den Schlüssel aus dem Secret ORS_API_KEY ein.
+const BUILTIN_KEY = "";
+function getKey(){ return store.get("orsKey", "").trim() || BUILTIN_KEY; }
 function askKey(){
   return new Promise(res => {
-    $("keyInput").value = getKey();
+    $("keyInput").value = BUILTIN_KEY ? "" : getKey();
+    $("keyInput").style.display = BUILTIN_KEY ? "none" : "";
+    $("keyBuiltin").style.display = BUILTIN_KEY ? "flex" : "none";
     $("keyTestOut").textContent = usageText();
     renderThemes();
     $("keyModal").style.display = "flex";
-    $("keySave").onclick = () => { store.set("orsKey", $("keyInput").value.trim()); $("keyModal").style.display = "none"; res(getKey()); };
+    $("keySave").onclick = () => { if (!BUILTIN_KEY) store.set("orsKey", $("keyInput").value.trim()); $("keyModal").style.display = "none"; res(getKey()); };
     $("keyCancel").onclick = () => { $("keyModal").style.display = "none"; res(getKey()); };
   });
 }
@@ -1128,9 +1134,9 @@ $("speakTest").onclick = async () => {
 
 // Diagnose: prüft Schlüssel, Rundkurs ohne und mit Wald-Gewichtung
 $("keyTest").onclick = async () => {
-  const out = $("keyTestOut"), key = $("keyInput").value.trim();
+  const out = $("keyTestOut"), key = $("keyInput").value.trim() || BUILTIN_KEY;
   if (!key){ out.textContent = "Bitte zuerst den Schlüssel einfügen."; return; }
-  const old = getKey(); store.set("orsKey", key);
+  const old = getKey(); if (key !== BUILTIN_KEY) store.set("orsKey", key);
   const c = start || map.getCenter();
   const lines = [];
   const log = t => { lines.push(t); out.textContent = lines.join("\n"); };
