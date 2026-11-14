@@ -135,6 +135,11 @@ button{font-family:inherit}
 .go{flex:none;width:58px;border:0;border-radius:16px;background:var(--accent);color:var(--on-accent);cursor:pointer;display:grid;place-items:center;box-shadow:0 2px 8px var(--soft)}
 .go .i{width:26px;height:26px;stroke-width:2.4}
 .go:disabled{opacity:.5}
+.modes{display:flex;gap:8px;margin:0 0 10px}
+.modes .grp{flex:1;display:flex;background:var(--panel-2);border-radius:14px;padding:3px;gap:2px;min-width:0}
+.modes button{flex:1;border:0;background:transparent;color:var(--muted);border-radius:11px;padding:5px 0 4px;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10.5px;font-weight:500;min-width:0;cursor:pointer}
+.modes button .i{width:20px;height:20px}
+.modes button.on{background:var(--panel);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.12)}
 .hint{font-size:12.5px;color:var(--muted);margin:8px 2px 0;display:flex;gap:6px;align-items:center}
 #status{font-size:13.5px;margin:12px 2px 4px;color:var(--muted);min-height:18px;line-height:1.35}
 .progress{height:4px;background:var(--line);border-radius:2px;overflow:hidden;display:none;margin-top:12px}
@@ -307,6 +312,9 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
   <symbol id="i-place" viewBox="0 0 24 24"><path d="M12 21.5s7-7 7-12.5a7 7 0 0 0-14 0c0 5.5 7 12.5 7 12.5z"/><path d="M12 6.3l.9 1.9 2 .3-1.5 1.4.4 2-1.8-1-1.8 1 .4-2-1.5-1.4 2-.3z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-gesture" viewBox="0 0 24 24"><path d="M3 18c2.5-4 4.5-7 6.5-7 2.3 0 .8 6 3.3 6 2.2 0 2.7-6 5-6 1.2 0 1.8 1.2 2.7 2.5"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M3.5 8.5a2 2 0 0 1 2-2h2.3l1.7-2.5h5l1.7 2.5h2.3a2 2 0 0 1 2 2v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.6"/></symbol>
+  <symbol id="i-run" viewBox="0 0 24 24"><circle cx="14.5" cy="4.5" r="2" fill="currentColor" stroke="none"/><path d="M13 8.5 9.5 10.5l-2.5-1"/><path d="M13 8.5l-1.5 5 3.5 2.5.5 5"/><path d="M11.5 13.5 9.5 17.5 5 18"/><path d="M13 8.5l2.5 3 3-.5"/></symbol>
+  <symbol id="i-hike" viewBox="0 0 24 24"><circle cx="11" cy="4.5" r="2" fill="currentColor" stroke="none"/><path d="M11 8.5 9.5 14l3 3 .5 4.5"/><path d="M9.5 14l-2 7"/><path d="M11 8.5l3 3h2"/><path d="M17.5 9.5v12"/><path d="M10.5 8.5H7.5v5H9"/></symbol>
+  <symbol id="i-path" viewBox="0 0 24 24"><path d="M6 21c0-5 4-6 6-9s2-6 0-9"/><path d="M15 21c0-4 3-5 4.5-8"/><path d="M8.5 3c1.5 3 1.5 5.5 0 8"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".7" fill="currentColor"/></symbol>
 </svg>
 <div id="map"></div>
@@ -356,6 +364,18 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
       <button class="chip" id="savedBtn"><svg class="i"><use href="#i-bookmark"/></svg>Gespeichert</button>
     </div>
     <div class="dropwrap"><div class="dropdown list" id="dropdown"></div></div>
+    <div class="modes">
+      <div class="grp" id="actSeg">
+        <button data-act="jog" title="Joggen"><svg class="i"><use href="#i-run"/></svg>Joggen</button>
+        <button data-act="hike" title="Wandern"><svg class="i"><use href="#i-hike"/></svg>Wandern</button>
+        <button data-act="bike" title="Radfahren"><svg class="i"><use href="#i-bike"/></svg>Rad</button>
+      </div>
+      <div class="grp" id="surfSeg">
+        <button data-surf="nature" title="Möglichst Wald- und Feldwege"><svg class="i"><use href="#i-tree"/></svg>Natur</button>
+        <button data-surf="paved" title="Möglichst Rad- und befestigte Wege"><svg class="i"><use href="#i-path"/></svg>Radwege</button>
+        <button data-surf="road" title="Straßen erlaubt (Asphalt)"><svg class="i"><use href="#i-road"/></svg>Straße</button>
+      </div>
+    </div>
     <div class="startinfo" id="startinfo"></div>
     <div class="row">
       <div class="dist">
@@ -363,7 +383,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
         <div class="lab"><input id="km" type="number" inputmode="decimal" min="1" max="60" step="0.5" value="8"><small>km</small></div>
         <button id="plus" aria-label="mehr"><svg class="i"><use href="#i-plus"/></svg></button>
       </div>
-      <button class="pace" id="paceBtn" aria-label="Lauftempo"><b><svg class="i s"><use href="#i-timer"/></svg><span id="paceTxt">5:30</span></b><small>min/km</small></button>
+      <button class="pace" id="paceBtn" aria-label="Tempo"><b><svg class="i s"><use href="#i-timer"/></svg><span id="paceTxt">5:30</span></b><small id="paceUnit">min/km</small></button>
       <button class="go" id="go" aria-label="Routen suchen"><svg class="i"><use href="#i-search"/></svg></button>
     </div>
     <div class="progress" id="prog"><i></i></div>
@@ -393,12 +413,12 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
 
 <div class="modal" id="paceModal">
   <div class="box">
-    <h2><svg class="i"><use href="#i-timer"/></svg>Lauftempo</h2>
-    <div class="pacebox"><span id="paceShow">5:30</span><small>min/km</small></div>
+    <h2><svg class="i"><use href="#i-timer"/></svg><span id="paceTitle">Lauftempo</span></h2>
+    <div class="pacebox"><span id="paceShow">5:30</span><small id="paceShowUnit">min/km</small></div>
     <div class="dual"><div class="track"><div class="fill" id="paceFill"></div></div>
-      <input type="range" id="paceA" min="180" max="900" step="5" aria-label="Lauftempo"></div>
-    <div class="dual-lab"><span>schnell · 3:00</span><span>15:00 · wandern</span></div>
-    <p style="margin-top:14px;display:flex;gap:8px;align-items:flex-start"><svg class="i s" style="margin-top:2px"><use href="#i-mountain"/></svg><span>Die Laufzeit berücksichtigt Steigungen: bergauf langsamer, leicht bergab etwas schneller.</span></p>
+      <input type="range" id="paceA" min="180" max="900" step="5" aria-label="Tempo"></div>
+    <div class="dual-lab"><span id="paceLo"></span><span id="paceHi"></span></div>
+    <p style="margin-top:14px;display:flex;gap:8px;align-items:flex-start"><svg class="i s" style="margin-top:2px"><use href="#i-mountain"/></svg><span id="paceNote">Die Zeit berücksichtigt Steigungen: bergauf langsamer, bergab schneller.</span></p>
     <div class="btns"><button class="primary" id="paceOk">Fertig</button></div>
   </div>
 </div>
@@ -641,7 +661,7 @@ const MANEUVER = {
   8:["⟳","Kreisverkehr verlassen"], 9:["↩","umdrehen"], 10:["🏁","Ziel erreicht"], 11:["⬆","Los geht's"],
   12:["↖","links halten"], 13:["↗","rechts halten"]
 };
-const ANNOUNCE_FAR = 120, ANNOUNCE_NOW = 25, OFF_ROUTE_M = 45;
+let ANNOUNCE_FAR = 120, ANNOUNCE_NOW = 25, OFF_ROUTE_M = 45;   // beim Start je Aktivität gesetzt (Rad: früher ansagen)
 // Abbiegepfeil wie in Navi-Apps: gerade hoch, dann in Abbiegerichtung
 const TURN_ANGLE = { 0: -90, 1: 90, 2: -140, 3: 140, 4: -45, 5: 45, 6: 0, 11: 0, 12: -28, 13: 28 };
 function turnIcon(type){
@@ -735,6 +755,7 @@ function stepPhrase(st){
 }
 
 async function startNav(r){
+  { const A = ACT[activity()]; ANNOUNCE_FAR = A.far; ANNOUNCE_NOW = A.now; OFF_ROUTE_M = A.off; }
   if (nav.active) stopNav(true);
   if (!r.steps || !r.steps.length){ status("Für diese Runde liegen keine Abbiegehinweise vor – bitte neu suchen."); return; }
   Object.assign(nav, { active:true, route:r, cum:cumulative(r.coords), idx:0, spoken:{}, km:0, offSince:0, offSaid:false, lastFix:0,
@@ -834,7 +855,7 @@ function updateNav(p){
       setArrow(turnIcon(6), brg);
       $("navDist").textContent = fmtDist(loc.d);
       $("navText").textContent = `Abseits der Route – nächster Routenpunkt ${word}`;
-      $("navInfo").textContent = `${ranKm} km gelaufen`;
+      $("navInfo").textContent = `${ranKm} km ${doneWord()}`;
       if (!nav.offSaid){
         speak(`Abseits der Route. Die Strecke geht ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word} weiter.`);
         vibrate([300, 150, 300]); nav.offSaid = true; nav.offGuide = Date.now();
@@ -843,7 +864,7 @@ function updateNav(p){
         nav.offGuide = Date.now();
         speak(`Nächster Routenpunkt ${spokenDist(loc.d).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} ${word}.`);
       }
-      if (nav.kmPending){ nav.kmPending = false; speak(`${nav.km} Kilometer gelaufen.`); }
+      if (nav.kmPending){ nav.kmPending = false; speak(`${nav.km} Kilometer ${doneWord()}.`); }
       return;
     }
   } else {
@@ -874,12 +895,12 @@ function updateNav(p){
     setArrow(ic("flag")); $("navDist").textContent = "Ziel"; $("navText").textContent = "Runde geschafft!";
     const diff = total - nav.ran;
     const extra = diff > 300 ? ` · ${fmt(diff / 1000)} km abgekürzt` : diff < -300 ? ` · ${fmt(-diff / 1000)} km Umweg` : "";
-    $("navInfo").textContent = `${ranKm} km gelaufen${extra}`;
+    $("navInfo").textContent = `${ranKm} km ${doneWord()}${extra}`;
     if (!nav.spoken.goal && remaining < 40){
       nav.spoken.goal = true;
       if (!nav.photoAsked){ nav.photoAsked = true; const run = snapshotRun(); setTimeout(() => offerPhoto(run), 2500); }
       const extraSpoken = diff > 300 ? `, ${fmt(diff / 1000)} Kilometer abgekürzt` : diff < -300 ? `, davon ${fmt(-diff / 1000)} Kilometer Umweg` : "";
-      speak(`Ziel erreicht. Du bist ${ranKm} Kilometer gelaufen${extraSpoken}. Stark!`);
+      speak(`Ziel erreicht. Du bist ${ranKm} Kilometer ${doneWord()}${extraSpoken}. Stark!`);
       vibrate([200, 100, 200, 100, 400]);
     }
     return;
@@ -901,7 +922,7 @@ function updateNav(p){
     speak(next.st.type === 10 ? `Noch ${spokenDist(next.dist).replace("Metern", "Meter").replace("Kilometern", "Kilometer")} bis zum Ziel` : `In ${spokenDist(next.dist)} ${phrase.charAt(0).toLowerCase() + phrase.slice(1)}`);
   }
   // Kilometer-Ansage nach tatsächlich gelaufener Strecke
-  if (nav.kmPending){ nav.kmPending = false; if (remaining > 300) speak(`${nav.km} Kilometer gelaufen, noch ${fmt(remaining / 1000)} Kilometer.`); }
+  if (nav.kmPending){ nav.kmPending = false; if (remaining > 300) speak(`${nav.km} Kilometer ${doneWord()}, noch ${fmt(remaining / 1000)} Kilometer.`); }
 }
 
 function stopNav(silent){
@@ -1030,35 +1051,86 @@ function chooseStart(lat, lng, label){
   status(hadResults ? "Vorherige Runden: siehe „Verlauf“." : "");
 }
 
+/* ---------- Aktivität (Joggen / Wandern / Rad) und bevorzugte Wege ---------- */
+// Je Kombination: welche Profile des Routendienstes (erst bevorzugt, dann Ausweichen), welche Gewichtung
+// ("nature" = grün + ruhig, "quiet" = nur ruhig, false = keine) und eigene Distanz-/Tempo-Grenzen.
+const ACT = {
+  jog:  { min: 1, max: 60,  step: 0.5, def: 8,  pace: { min: 180, max: 900,  step: 5, def: 330 }, done: "gelaufen",  far: 120, now: 25, off: 45 },
+  hike: { min: 1, max: 60,  step: 0.5, def: 10, pace: { min: 480, max: 1500, step: 15, def: 900 }, done: "gewandert", far: 120, now: 25, off: 45 },
+  bike: { min: 5, max: 100, step: 5,   def: 30, speed: { min: 8, max: 40, step: 1, def: 18 },      done: "gefahren",  far: 200, now: 40, off: 60 }
+};
+const PHASES = {
+  jog:  { nature: [["foot-hiking", true], ["foot-walking", false]], paved: [["foot-walking", "quiet"], ["foot-hiking", false]], road: [["foot-walking", false]] },
+  hike: { nature: [["foot-hiking", true], ["foot-walking", false]], paved: [["foot-walking", "quiet"], ["foot-hiking", false]], road: [["foot-walking", false]] },
+  bike: { nature: [["cycling-mountain", true], ["cycling-regular", false]], paved: [["cycling-regular", "quiet"], ["cycling-electric", false]], road: [["cycling-road", false], ["cycling-regular", false]] }
+};
+function activity(){ const a = store.get("activity", "jog"); return ACT[a] ? a : "jog"; }
+function surface(){ const s = store.get("surface", "nature"); return ["nature", "paved", "road"].includes(s) ? s : "nature"; }
+function isBike(){ return activity() === "bike"; }
+function phasesNow(){ return PHASES[activity()][surface()]; }
+function doneWord(){ return ACT[activity()].done; }
+function tolKm(target){ return Math.max(TOL_KM, Math.round(target * 0.1)); }
+
 /* ---------- Distanz ---------- */
-function km(){ const v = parseFloat(String($("km").value).replace(",", ".")); return isFinite(v) ? Math.min(60, Math.max(1, v)) : 8; }
-$("minus").onclick = () => { $("km").value = Math.max(1, km() - 0.5); store.set("km", $("km").value); };
-$("plus").onclick  = () => { $("km").value = Math.min(60, km() + 0.5); store.set("km", $("km").value); };
-$("km").value = store.get("km", "8");
-$("km").onchange = () => store.set("km", km());
+function km(){ const A = ACT[activity()], v = parseFloat(String($("km").value).replace(",", ".")); return isFinite(v) ? Math.min(A.max, Math.max(A.min, v)) : A.def; }
+const kmKey = () => "km_" + activity();
+$("minus").onclick = () => { const A = ACT[activity()]; $("km").value = Math.max(A.min, km() - A.step); store.set(kmKey(), $("km").value); };
+$("plus").onclick  = () => { const A = ACT[activity()]; $("km").value = Math.min(A.max, km() + A.step); store.set(kmKey(), $("km").value); };
+$("km").onchange = () => store.set(kmKey(), km());
+function applyActivity(){
+  const a = activity(), A = ACT[a];
+  $("km").min = A.min; $("km").max = A.max; $("km").step = A.step;
+  $("km").value = store.get(kmKey(), a === "jog" ? store.get("km", String(A.def)) : String(A.def));
+  document.querySelectorAll("#actSeg button").forEach(b => b.classList.toggle("on", b.dataset.act === a));
+  document.querySelectorAll("#surfSeg button").forEach(b => b.classList.toggle("on", b.dataset.surf === surface()));
+  $("paceTxt").textContent = paceLabel(); $("paceUnit").textContent = paceUnit();
+  if (typeof results !== "undefined" && results.length) render(true);
+  updateStartInfo();
+}
+$("actSeg").onclick = e => {
+  const b = e.target.closest("[data-act]"); if (!b || b.dataset.act === activity()) return;
+  if (nav.active){ toast("Erst die Navigation beenden"); return; }
+  store.set("activity", b.dataset.act); applyActivity();
+  if (results.length) status("Für die neue Auswahl bitte neu suchen.");
+};
+$("surfSeg").onclick = e => {
+  const b = e.target.closest("[data-surf]"); if (!b || b.dataset.surf === surface()) return;
+  store.set("surface", b.dataset.surf); applyActivity();
+  if (results.length) status("Für die neue Auswahl bitte neu suchen.");
+};
 
 /* ---------- Lauftempo & Laufzeit ---------- */
-// Ein festes Tempo in Sekunden pro km (z. B. 5:30). Die Laufzeit rechnet Steigungen mit ein.
-function paceValue(){
-  let p = Number(store.get("pace", ""));
-  if (!(p >= 120 && p <= 900)){   // frühere Einstellung "von–bis" → Mittelwert übernehmen
-    const a = Number(store.get("paceA", "300")), b = Number(store.get("paceB", "360"));
-    p = (a >= 120 && b >= 120) ? Math.round((a + b) / 2 / 5) * 5 : 330;
+// Joggen/Wandern: Tempo in Sekunden pro km (z. B. 5:30). Rad: Geschwindigkeit in km/h.
+// Intern wird immer mit Sekunden pro km gerechnet. Die Zeit rechnet Steigungen mit ein.
+function paceSetting(){
+  const a = activity(), A = ACT[a], cfg = A.pace || A.speed;
+  let v = Number(store.get("pace_" + a, ""));
+  if (a === "jog" && !(v >= cfg.min)){               // frühere Einstellungen übernehmen
+    v = Number(store.get("pace", ""));
+    if (!(v >= 120)){ const x = Number(store.get("paceA", "300")), y = Number(store.get("paceB", "360")); v = (x >= 120 && y >= 120) ? Math.round((x + y) / 2 / 5) * 5 : cfg.def; }
   }
-  return p;
+  return v >= cfg.min && v <= cfg.max ? v : cfg.def;
 }
+function paceValue(){ return isBike() ? 3600 / paceSetting() : paceSetting(); }
+function paceUnit(){ return isBike() ? "km/h" : "min/km"; }
 function paceRange(){ const p = paceValue(); return [p, p]; }
 function paceMid(){ const [a, b] = paceRange(); return (a + b) / 2; }
 function fmtPace(sec){ sec = Math.round(sec); return Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0"); }
-function paceLabel(){ const [a, b] = paceRange(); return a === b ? fmtPace(a) : `${fmtPace(a)}–${fmtPace(b)}`; }
+function paceLabel(){ return isBike() ? String(paceSetting()) : fmtPace(paceValue()); }
+// Tempo bzw. Geschwindigkeit für Anzeigen nach dem Lauf/der Fahrt
+function speedText(secs, km){ return isBike() ? `${fmt(km / (secs / 3600))} km/h` : `${fmtPace(secs / km)} /km`; }
 // Zeitfaktor je Steigung (g als Anteil, 0,05 = 5 %): angelehnt an Messungen zum "steigungsbereinigten Tempo" –
 // bergauf deutlich langsamer, leicht bergab etwas schneller, steil bergab wieder langsamer.
 function gradeFactor(g){ const x = Math.max(-40, Math.min(40, g * 100)); return Math.max(0.8, 1 + 0.03 * x + 0.0012 * x * x); }
+// Rad: bergauf viel langsamer (5 % ≈ 1,7-fache Zeit), bergab deutlich schneller (bis etwa halbe Zeit)
+function gradeFactorBike(g){ const x = Math.max(-25, Math.min(25, g * 100)); return x >= 0 ? 1 + 0.12 * x + 0.004 * x * x : Math.max(0.55, 1 + 0.06 * x); }
 // "Flach-gleichwertige" Strecke in Metern: so lange würde die Runde im Flachen dauern
 function flatEquivalent(r){
-  if (r._flat) return r._flat;
+  const bike = isBike(), ck = bike ? "_flatBike" : "_flat";
+  if (r[ck]) return r[ck];
+  const gf = bike ? gradeFactorBike : gradeFactor;
   const cum = r.cum || (r.cum = cumulative(r.coords)), total = cum[cum.length - 1] || 0;
-  if (!r.ele || r.ele.length !== r.coords.length || total < 100) return (r._flat = total + (r.ascent || 0) * 7);
+  if (!r.ele || r.ele.length !== r.coords.length || total < 100) return (r[ck] = total + (r.ascent || 0) * (bike ? 12 : 7));
   const STEP = 25, E = [];
   for (let d = 0, i = 1; d <= total; d += STEP){
     while (i < cum.length - 1 && cum[i] < d) i++;
@@ -1069,9 +1141,9 @@ function flatEquivalent(r){
   let S = E;
   for (let pass = 0; pass < 2; pass++) S = S.map((v, k) => { let sum = 0, n = 0; for (let j = k - 2; j <= k + 2; j++) if (j >= 0 && j < S.length){ sum += S[j]; n++; } return sum / n; });
   let flat = 0;
-  for (let k = 1; k < S.length; k++) flat += STEP * gradeFactor((S[k] - S[k-1]) / STEP);
+  for (let k = 1; k < S.length; k++) flat += STEP * gf((S[k] - S[k-1]) / STEP);
   const covered = STEP * (S.length - 1);
-  return (r._flat = covered > 0 ? flat * total / covered : total);
+  return (r[ck] = covered > 0 ? flat * total / covered : total);
 }
 function durText(r){
   const [a, b] = paceRange(), f = flatEquivalent(r) / 1000;
@@ -1081,19 +1153,27 @@ function durText(r){
   return m1 === m2 ? `${h(m1)} h` : `${h(m1)}–${h(m2)} h`;
 }
 function showPace(){
-  const a = +$("paceA").value, f = v => (v - 180) / (900 - 180) * 100;
+  const inp = $("paceA"), a = +inp.value, mn = +inp.min, mx = +inp.max, f = v => (v - mn) / (mx - mn) * 100;
   $("paceFill").style.left = "0%"; $("paceFill").style.right = (100 - f(a)) + "%";
-  $("paceShow").textContent = fmtPace(a);
+  $("paceShow").textContent = isBike() ? String(a) : fmtPace(a);
 }
-$("paceTxt").textContent = paceLabel();
-$("paceBtn").onclick = () => { $("paceA").value = paceValue(); showPace(); $("paceModal").style.display = "flex"; };
+$("paceBtn").onclick = () => {
+  const a = activity(), A = ACT[a], cfg = A.pace || A.speed, bike = a === "bike";
+  const inp = $("paceA"); inp.min = cfg.min; inp.max = cfg.max; inp.step = cfg.step; inp.value = paceSetting();
+  $("paceTitle").textContent = bike ? "Geschwindigkeit" : a === "hike" ? "Wandertempo" : "Lauftempo";
+  $("paceShowUnit").textContent = paceUnit();
+  $("paceLo").textContent = bike ? `langsam · ${cfg.min} km/h` : `schnell · ${fmtPace(cfg.min)}`;
+  $("paceHi").textContent = bike ? `${cfg.max} km/h · schnell` : `${fmtPace(cfg.max)} · gemütlich`;
+  showPace(); $("paceModal").style.display = "flex";
+};
 $("paceA").oninput = showPace;
 $("paceOk").onclick = () => {
-  store.set("pace", $("paceA").value);
-  $("paceTxt").textContent = paceLabel(); $("paceModal").style.display = "none";
+  store.set("pace_" + activity(), $("paceA").value);
+  $("paceTxt").textContent = paceLabel(); $("paceUnit").textContent = paceUnit(); $("paceModal").style.display = "none";
   if (results.length) render(true);
 };
 $("paceModal").onclick = e => { if (e.target.id === "paceModal") $("paceOk").onclick(); };
+applyActivity();
 
 /* ---------- API-Schlüssel ---------- */
 // Eingebauter Schlüssel: bleibt in der normalen App leer. Nur beim Bau der Tester-Version
@@ -1215,7 +1295,7 @@ async function orsVia(profile, pts, nature, radiuses){
   return orsPost(profile, nature, () => ({ coordinates: pts.map(q => [q[1], q[0]]), radiuses, options: {} }));
 }
 async function orsPost(profile, nature, build){
-  const w = nature ? WEIGHT_MODES[weightMode] : null;
+  const w = nature === "quiet" ? { quiet: 0.6 } : nature ? WEIGHT_MODES[weightMode] : null;
   const body = Object.assign({ elevation: true, extra_info: useGreenExtra ? ["waytype", "surface", "green"] : ["waytype", "surface"],
                                instructions: true, language: "de", units: "m" }, build());
   if (w) body.options = Object.assign({}, body.options, { profile_params: { weightings: Object.assign({}, w) } });
@@ -1584,9 +1664,13 @@ function analyse(feature){
   // Punkte: Wald-/Feldwege hoch. Nebenstraßen (meist Wohngebiet) deutlich abwerten, Radwege nur leicht –
   // lieber ein Radweg am Feld als quer durch die Siedlung. Hauptstraßen stark abwerten.
   // Dazu: doppelte Strecke, Kreuzungen, Rundheit und – falls vorhanden – der Grün-Index.
-  const score = pct("nature") * 100 + (total ? unpaved / total : 0) * 25 + pct("unknown") * 10
-              - pct("main") * 120 - pct("street") * 45 - pct("cycle") * 8 - ov.share * 90
-              - cross.length * 14 + round * 30 + (green !== null ? (green - 5) * 5 : 0);
+  const common = - ov.share * 90 - cross.length * 14 + round * 30;
+  const unp = total ? unpaved / total : 0, sf = surface();
+  const score = sf === "paved"
+      ? pct("cycle") * 100 + pct("nature") * 30 - pct("main") * 120 - pct("street") * 35 - unp * 20 + common + (green !== null ? (green - 5) * 2 : 0)
+    : sf === "road"
+      ? (pct("street") + pct("cycle")) * 60 + pct("unknown") * 20 - pct("main") * 50 - unp * 40 + common
+      : pct("nature") * 100 + unp * 25 + pct("unknown") * 10 - pct("main") * 120 - pct("street") * 45 - pct("cycle") * 8 + common + (green !== null ? (green - 5) * 5 : 0);
   // Laufrichtung: Vorzeichen der umschlossenen Fläche (positiv = gegen den Uhrzeigersinn)
   let area2 = 0;
   for (let k = 1; k < coords.length; k++) area2 += coords[k-1][1] * coords[k][0] - coords[k][1] * coords[k-1][0];
@@ -1625,7 +1709,7 @@ function reverseRoute(r){
   }
   steps.push({ type: 10, text: "", name: "", wp: n - 1 });
   return Object.assign({}, r, {
-    coords: C, cum, steps, ele: r.ele ? r.ele.slice().reverse() : null, _steep: null, _flat: null, vias: r.vias ? r.vias.slice().reverse() : undefined,
+    coords: C, cum, steps, ele: r.ele ? r.ele.slice().reverse() : null, _steep: null, _flat: null, _flatBike: null, vias: r.vias ? r.vias.slice().reverse() : undefined,
     ascent: r.descent || r.ascent, descent: r.ascent,
     doubled: (r.doubled || []).map(seg => seg.slice().reverse()),
     doubledRanges: (r.doubledRanges || []).map(x => [total - x[1], total - x[0]]),
@@ -1664,16 +1748,14 @@ async function search(){
 
   const found = [], near = [];
   let requests = 0, okCount = 0, errCount = 0, lastErr = "", stopped = "", rateWaits = 0;
-  // Phase 1: Wanderprofil mit Grün-/Ruhe-Gewichtung. Phase 2 (nur falls nötig): normales Fußprofil, Straßen erlaubt.
-  const phases = [
-    { profile: "foot-hiking",  nature: true,  label: "Suche Wald- und Feldwege", budget: 15 },
-    { profile: "foot-walking", nature: false, label: "Erweitere Suche auf alle Wege", budget: 99 }
-  ];
+  // Phase 1: bevorzugtes Profil der gewählten Aktivität/Wege. Phase 2 (nur falls nötig): Ausweich-Profil.
+  const tol = tolKm(target);
+  const phases = phasesNow().map(([profile, nature], k) => ({ profile, nature, budget: k === 0 ? 15 : 99 }));
   try {
     for (const ph of phases){
       if (stopped) break;
       const cleanN = () => found.filter(r => r.clean).length;
-      if (!ph.nature && found.length >= 3 && cleanN() >= 1) break;
+      if (ph !== phases[0] && found.length >= 3 && cleanN() >= 1) break;
       // Längenfaktor je Profil: openrouteservice liefert oft deutlich längere/kürzere Runden als angefragt
       const fKey = "lenFactor_" + ph.profile;
       let factor = Number(store.get(fKey, "0.75")) || 0.75;
@@ -1681,13 +1763,13 @@ async function search(){
       // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
       while (!stopped && tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
         tries++; requests++;
-        status(`${ph.nature ? "Wald & Feld" : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
+        status(`${ph === phases[0] ? ({ nature: "Wald & Feld", paved: "Radwege", road: "Straßen" })[surface()] : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
         setProgress(requests / MAX_REQUESTS);
         const points = [5, 4, 6, 5, 7, 4][requests % 6];   // mehr Punkte = rundere Runde, weniger Hin-und-zurück
         const seed = Math.floor(Math.random() * 10000);
         const jitter = 0.92 + Math.random() * 0.16;
         let f;
-        try { f = await orsRoundTrip(ph.profile, target * 1000 * factor * jitter, points, seed, ph.nature); }
+        try { f = await orsRoundTrip(ph.profile, Math.min(100000, target * 1000 * factor * jitter), points, seed, ph.nature); }
         catch(e){
           errCount++; lastErr = e.message;
           if (e.code === "key"){ stopped = "key"; break; }
@@ -1711,8 +1793,8 @@ async function search(){
           const ratio = target / r.distKm;
           if (isFinite(ratio) && r.distKm > 0.3) factor = Math.min(1.5, Math.max(0.35, factor * Math.pow(ratio, 0.6)));
           r.dev = r.distKm - target;
-          r.relaxed = !ph.nature;
-          if (Math.abs(r.dev) <= TOL_KM){
+          r.relaxed = ph !== phases[0]; r.profile = ph.profile; r.weight = ph.nature;
+          if (Math.abs(r.dev) <= tol){
             if (!found.some(o => isDuplicate(o, r))){
               found.push(r);
               // Sortierung: Natur-Anteil zählt am meisten, nähere Distanz leicht bevorzugt
@@ -1735,7 +1817,7 @@ async function search(){
       near.sort((a, b) => Math.abs(a.dev) - Math.abs(b.dev));
       results = near.slice(0, 3).map(r => Object.assign(r, { outside: true })); render();
       addHistory(target);
-      status(stopped ? stopNote + " Bisher: die nächstgelegenen Runden." : `Nichts mit ${fmt(target)} ±${TOL_KM} km – die nächstgelegenen Runden:`);
+      status(stopped ? stopNote + " Bisher: die nächstgelegenen Runden." : `Nichts mit ${fmt(target)} ±${tol} km – die nächstgelegenen Runden:`);
     } else { addHistory(target); status(`${found.length} Runde${found.length > 1 ? "n" : ""} gefunden` + (stopped ? " · vorzeitig beendet: " + stopNote : "")); }
   } finally { searching = false; $("go").disabled = false; setProgress(0); if (!results.length) setLocked(false); }
 }
@@ -1900,8 +1982,10 @@ function drawDecor(r, color){
   // Auf doppelt gelaufenen Stücken Pfeile/Nummern rechts neben die Linie setzen, damit Hin- und Rückweg getrennt sichtbar sind
   const isDoubled = d => (r.doubledRanges || []).some(x => d >= x[0] && d <= x[1]);
   const arrowSvg = (a, shift) => `<svg width="14" height="14" viewBox="0 0 14 14" style="transform:rotate(${a}deg)${shift ? " translateX(9px)" : ""}"><path d="M7 1.5 L12 11 L7 8.4 L2 11 Z" fill="#fff" stroke="${color}" stroke-width="1.2" stroke-linejoin="round"/></svg>`;
-  for (let dist = 125; dist < total - 60; dist += 250){
-    if (Math.abs(dist % 1000) < 90 || Math.abs(dist % 1000 - 1000) < 90) continue;   // nicht auf Kilometer-Marken
+  // Bei langen Runden (Rad) Nummern nur alle 2 bzw. 5 km und Pfeile weiter auseinander, sonst wird es zu voll
+  const kmStep = total > 25000 ? 5 : total > 12000 ? 2 : 1, M = kmStep * 1000, aStep = 250 * kmStep;
+  for (let dist = aStep / 2; dist < total - 60; dist += aStep){
+    if (Math.abs(dist % M) < 90 || Math.abs(dist % M - M) < 90) continue;   // nicht auf Kilometer-Marken
     const p = pointAt(r.coords, cum, dist);
     L.marker(p.ll, { icon: L.divIcon({ className: "", html: `<div class="dir-arrow">${arrowSvg(p.angle, isDoubled(dist))}</div>`, iconSize: [16,16], iconAnchor: [8,8] }),
       interactive: false, keyboard: false }).addTo(decor);
@@ -1914,7 +1998,7 @@ function drawDecor(r, color){
   (r.crossPts || []).forEach(ll => L.marker(ll, { icon: L.divIcon({ className: "", html: '<div style="width:12px;height:12px;border-radius:50%;border:2.5px solid #fff;background:#d1453b;box-shadow:0 0 2px rgba(0,0,0,.6)"></div>', iconSize: [12,12], iconAnchor: [6,6] }), interactive: false }).addTo(decor));
   // Kilometer-Nummern + Startmarke
   const kmIcon = (txt, off) => L.divIcon({ className: "", html: `<div class="km-mark" style="--rc:${color};${off ? `transform:translate(${off[0]}px,${off[1]}px)` : ""}">${txt}</div>`, iconSize: [22,22], iconAnchor: [11,11] });
-  for (let k = 1; k * 1000 < total - 150; k++){
+  for (let k = kmStep; k * 1000 < total - 150; k += kmStep){
     const p = pointAt(r.coords, cum, k * 1000), rad = p.angle * Math.PI / 180;
     const off = isDoubled(k * 1000) ? [Math.cos(rad) * 15, Math.sin(rad) * 15] : null;   // 15 px rechts der Laufrichtung
     L.marker(p.ll, { icon: kmIcon(k, off), interactive: false, keyboard: false, zIndexOffset: 500 }).addTo(decor);
@@ -1955,7 +2039,7 @@ function unpackRoute(r){
 }
 function packRoute(r){
   const o = Object.assign({}, r);
-  delete o.cum; delete o.coords; delete o._steep; delete o._flat; delete o.ele;
+  delete o.cum; delete o.coords; delete o._steep; delete o._flat; delete o._flatBike; delete o.ele;
   if (r.ele){ let h = 0; o.e = r.ele.map(v => { const d = (v || 0) - h; h = v || 0; return d; }); }
   o.c = encodeCoords(r.coords);
   o.doubled = (r.doubled || []).map(seg => seg.map(c => [r5(c[0]), r5(c[1])]));
@@ -2160,7 +2244,7 @@ function startEdit(i){
   const r = results[i];
   Object.assign(edit, { on: true, i, orig: r, undo: [], pending: false, busy: false,
     vias: (r.vias && r.vias.length ? snapToRoute(r, r.vias) : viaPoints(r)).map(q => [q[0], q[1]]),
-    profile: r.profile || (r.relaxed ? "foot-walking" : "foot-hiking"), nature: !r.relaxed });
+    profile: r.profile || (r.relaxed ? phasesNow().slice(-1)[0][0] : phasesNow()[0][0]), nature: r.weight !== undefined ? r.weight : (r.relaxed ? false : phasesNow()[0][1]) });
   document.body.classList.add("editing");
   setMode("edit"); setSheet(2); select(i); drawHandles();
 }
@@ -2317,7 +2401,7 @@ function finishDraw(){
   const pts = draw.pts.slice();
   let len = 0; for (let k = 1; k < pts.length; k++) len += haversine(pts[k-1], pts[k]);
   if (pts.length < 3 || len < 400){ toast("Bitte eine längere Strecke zeichnen"); return; }
-  if (len > 60000){ toast("Zu lang – bitte näher heranzoomen und neu zeichnen"); drawUndo(); return; }
+  if (len > (isBike() ? 120000 : 60000)){ toast("Zu lang – bitte näher heranzoomen und neu zeichnen"); drawUndo(); return; }
   endDraw();
   sketchSearch(pts);
 }
@@ -2341,11 +2425,12 @@ async function sketchSearch(pts){
     if (fastD(sk[L1], S) > 150 && (!out.length || L1 - out[out.length - 1] > step / 3)) out.push(L1);
     return out.slice(0, 45);
   };
+  const P1 = phasesNow()[0], P2 = phasesNow().slice(-1)[0];
   const variants = [
-    { sp: Math.max(220, len / 22), nature: true,  rad: 150, profile: "foot-hiking",  label: "Eng an der Skizze" },
-    { sp: Math.max(300, len / 12), nature: true,  rad: 300, profile: "foot-hiking",  label: "Mehr Wald & Feld" },
-    { sp: Math.max(450, len / 7),  nature: true,  rad: 500, profile: "foot-hiking",  label: "Freier geführt" },
-    { sp: Math.max(300, len / 12), nature: false, rad: 200, profile: "foot-walking", label: "Alle Wege" }
+    { sp: Math.max(220, len / 22), nature: P1[1], rad: 150, profile: P1[0], label: "Eng an der Skizze" },
+    { sp: Math.max(300, len / 12), nature: P1[1], rad: 300, profile: P1[0], label: "Mehr nach Wunsch" },
+    { sp: Math.max(450, len / 7),  nature: P1[1], rad: 500, profile: P1[0], label: "Freier geführt" },
+    { sp: Math.max(300, len / 12), nature: false, rad: 200, profile: P2[0], label: "Alle Wege" }
   ];
   const found = []; let done = 0, lastErr = "", stop = false;
   const TOTAL = variants.length + 5;
@@ -2425,7 +2510,7 @@ function offerPhoto(run){
   if (!run || $("runModal").style.display === "flex") return;
   lastRun = run;
   const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
-  $("runStats").innerHTML = `${ic("flag", "s")} ${fmt(run.dist / 1000)} km &nbsp; ${ic("timer", "s")} ${m}:${String(sec).padStart(2, "0")} min &nbsp; ${fmtPace(run.secs / (run.dist / 1000))} /km`;
+  $("runStats").innerHTML = `${ic("flag", "s")} ${fmt(run.dist / 1000)} km &nbsp; ${ic("timer", "s")} ${m}:${String(sec).padStart(2, "0")} min &nbsp; ${speedText(run.secs, run.dist / 1000)}`;
   $("runModal").style.display = "flex";
 }
 $("runPhoto").onclick = () => { $("runModal").style.display = "none"; openCamera(); };
@@ -2492,7 +2577,7 @@ function renderShot(run, photo, layout){
   };
   const m = Math.floor(run.secs / 60), sec = Math.round(run.secs % 60);
   const hours = m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(sec).padStart(2, "0")}` : `${m}:${String(sec).padStart(2, "0")}`;
-  const stats = [[fmt(run.dist / 1000), " km", 104], [hours, m >= 60 ? " h" : " min", 58], [fmtPace(run.secs / (run.dist / 1000)), " /km", 44]];
+  const stats = [[fmt(run.dist / 1000), " km", 104], [hours, m >= 60 ? " h" : " min", 58], (isBike() ? [fmt(run.dist / 1000 / (run.secs / 3600)), " km/h", 44] : [fmtPace(run.secs / (run.dist / 1000)), " /km", 44])];
   const where = [run.label, run.date.toLocaleDateString("de-DE", { day: "numeric", month: "long", year: "numeric" })].filter(Boolean).join(" · ");
   const text = (t, x, y, size, weight, align, alpha) => {
     g.save(); g.font = `${weight} ${size}px Roboto, "Google Sans", system-ui, sans-serif`; g.textAlign = align; g.fillStyle = `rgba(255,255,255,${alpha ?? 1})`;
