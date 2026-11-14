@@ -372,7 +372,6 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
       </div>
       <div class="grp" id="surfSeg">
         <button data-surf="nature" title="Möglichst Wald- und Feldwege"><svg class="i"><use href="#i-tree"/></svg>Natur</button>
-        <button data-surf="paved" title="Möglichst Rad- und befestigte Wege"><svg class="i"><use href="#i-path"/></svg>Radwege</button>
         <button data-surf="road" title="Straßen erlaubt (Asphalt)"><svg class="i"><use href="#i-road"/></svg>Straße</button>
       </div>
     </div>
@@ -1060,12 +1059,12 @@ const ACT = {
   bike: { min: 5, max: 100, step: 5,   def: 30, speed: { min: 8, max: 40, step: 1, def: 18 },      done: "gefahren",  far: 200, now: 40, off: 60 }
 };
 const PHASES = {
-  jog:  { nature: [["foot-hiking", true], ["foot-walking", false]], paved: [["foot-walking", "quiet"], ["foot-hiking", false]], road: [["foot-walking", false]] },
-  hike: { nature: [["foot-hiking", true], ["foot-walking", false]], paved: [["foot-walking", "quiet"], ["foot-hiking", false]], road: [["foot-walking", false]] },
-  bike: { nature: [["cycling-mountain", true], ["cycling-regular", false]], paved: [["cycling-regular", "quiet"], ["cycling-electric", false]], road: [["cycling-road", false], ["cycling-regular", false]] }
+  jog:  { nature: [["foot-hiking", true], ["foot-walking", false]], road: [["foot-walking", false]] },
+  hike: { nature: [["foot-hiking", true], ["foot-walking", false]], road: [["foot-walking", false]] },
+  bike: { nature: [["cycling-mountain", true], ["cycling-regular", false]], road: [["cycling-road", false], ["cycling-regular", false]] }
 };
 function activity(){ const a = store.get("activity", "jog"); return ACT[a] ? a : "jog"; }
-function surface(){ const s = store.get("surface", "nature"); return ["nature", "paved", "road"].includes(s) ? s : "nature"; }
+function surface(){ const s = store.get("surface", "nature"); return s === "road" ? "road" : "nature"; }   // frühere Wahl „Radwege“ → Natur
 function isBike(){ return activity() === "bike"; }
 function phasesNow(){ return PHASES[activity()][surface()]; }
 function doneWord(){ return ACT[activity()].done; }
@@ -1666,9 +1665,7 @@ function analyse(feature){
   // Dazu: doppelte Strecke, Kreuzungen, Rundheit und – falls vorhanden – der Grün-Index.
   const common = - ov.share * 90 - cross.length * 14 + round * 30;
   const unp = total ? unpaved / total : 0, sf = surface();
-  const score = sf === "paved"
-      ? pct("cycle") * 100 + pct("nature") * 30 - pct("main") * 120 - pct("street") * 35 - unp * 20 + common + (green !== null ? (green - 5) * 2 : 0)
-    : sf === "road"
+  const score = sf === "road"
       ? (pct("street") + pct("cycle")) * 60 + pct("unknown") * 20 - pct("main") * 50 - unp * 40 + common
       : pct("nature") * 100 + unp * 25 + pct("unknown") * 10 - pct("main") * 120 - pct("street") * 45 - pct("cycle") * 8 + common + (green !== null ? (green - 5) * 5 : 0);
   // Laufrichtung: Vorzeichen der umschlossenen Fläche (positiv = gegen den Uhrzeigersinn)
@@ -1763,7 +1760,7 @@ async function search(){
       // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
       while (!stopped && tries < ph.budget && !(found.length >= WANT_RESULTS && cleanN() >= 2) && requests < MAX_REQUESTS){
         tries++; requests++;
-        status(`${ph === phases[0] ? ({ nature: "Wald & Feld", paved: "Radwege", road: "Straßen" })[surface()] : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
+        status(`${ph === phases[0] ? ({ nature: "Wald & Feld", road: "Straßen" })[surface()] : "Alle Wege"} … ${found.length} Runde${found.length === 1 ? "" : "n"} · ${requests}/${MAX_REQUESTS}`);
         setProgress(requests / MAX_REQUESTS);
         const points = [5, 4, 6, 5, 7, 4][requests % 6];   // mehr Punkte = rundere Runde, weniger Hin-und-zurück
         const seed = Math.floor(Math.random() * 10000);
