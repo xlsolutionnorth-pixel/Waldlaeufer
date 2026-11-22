@@ -139,6 +139,11 @@ button{font-family:inherit}
 .modes .grp{flex:1;display:flex;background:var(--panel-2);border-radius:14px;padding:3px;gap:2px;min-width:0}
 .modes button{flex:1;border:0;background:transparent;color:var(--muted);border-radius:11px;padding:5px 0 4px;display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10.5px;font-weight:500;min-width:0;cursor:pointer}
 .modes button .i{width:20px;height:20px}
+.modes .dirsel{flex:0 0 64px;position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;background:var(--panel-2);border-radius:14px;font-size:10.5px;font-weight:500;color:var(--muted)}
+.modes .dirsel .i{width:20px;height:20px}
+.modes .dirsel.on{color:var(--accent);background:var(--soft)}
+.modes .dirsel select{position:absolute;inset:0;opacity:0;width:100%;height:100%;font-size:16px;cursor:pointer}
+.dir-arrow-big{width:96px;height:96px;pointer-events:none;filter:drop-shadow(0 1px 2px rgba(0,0,0,.35))}
 .modes button.on{background:var(--panel);color:var(--accent);box-shadow:0 1px 4px rgba(0,0,0,.12)}
 .hint{font-size:12.5px;color:var(--muted);margin:8px 2px 0;display:flex;gap:6px;align-items:center}
 #status{font-size:13.5px;margin:12px 2px 4px;color:var(--muted);min-height:18px;line-height:1.35}
@@ -315,6 +320,7 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
   <symbol id="i-run" viewBox="0 0 24 24"><circle cx="14.5" cy="4.5" r="2" fill="currentColor" stroke="none"/><path d="M13 8.5 9.5 10.5l-2.5-1"/><path d="M13 8.5l-1.5 5 3.5 2.5.5 5"/><path d="M11.5 13.5 9.5 17.5 5 18"/><path d="M13 8.5l2.5 3 3-.5"/></symbol>
   <symbol id="i-hike" viewBox="0 0 24 24"><circle cx="11" cy="4.5" r="2" fill="currentColor" stroke="none"/><path d="M11 8.5 9.5 14l3 3 .5 4.5"/><path d="M9.5 14l-2 7"/><path d="M11 8.5l3 3h2"/><path d="M17.5 9.5v12"/><path d="M10.5 8.5H7.5v5H9"/></symbol>
   <symbol id="i-path" viewBox="0 0 24 24"><path d="M6 21c0-5 4-6 6-9s2-6 0-9"/><path d="M15 21c0-4 3-5 4.5-8"/><path d="M8.5 3c1.5 3 1.5 5.5 0 8"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z" fill="currentColor" stroke="none"/></symbol>
   <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r=".7" fill="currentColor"/></symbol>
 </svg>
 <div id="map"></div>
@@ -374,6 +380,14 @@ body.drawing #map,body.drawing #map *{cursor:crosshair;touch-action:none!importa
         <button data-surf="nature" title="Möglichst Wald- und Feldwege"><svg class="i"><use href="#i-tree"/></svg>Natur</button>
         <button data-surf="road" title="Straßen erlaubt (Asphalt)"><svg class="i"><use href="#i-road"/></svg>Straße</button>
       </div>
+      <label class="dirsel" id="dirBox" title="Himmelsrichtung der Runde">
+        <svg class="i" id="dirIcon"><use href="#i-compass"/></svg><span id="dirTxt">Alle</span>
+        <select id="dirSel" aria-label="Himmelsrichtung">
+          <option value="">Alle Richtungen</option>
+          <option value="0">Norden</option><option value="45">Nordosten</option><option value="90">Osten</option><option value="135">Südosten</option>
+          <option value="180">Süden</option><option value="225">Südwesten</option><option value="270">Westen</option><option value="315">Nordwesten</option>
+        </select>
+      </label>
     </div>
     <div class="startinfo" id="startinfo"></div>
     <div class="row">
@@ -590,7 +604,7 @@ function setStart(lat, lng, label, keepResults){
       setStart(p.lat, p.lng);
     });
   } else startMarker.setLatLng([lat, lng]);
-  updateStartInfo();
+  updateStartInfo(); showDirection();
   if (!keepResults) clearRoutes();
 }
 function startText(){ return startLabel ? escapeHtml(startLabel) : start.lat.toFixed(5) + ", " + start.lng.toFixed(5); }
@@ -1070,6 +1084,58 @@ function phasesNow(){ return PHASES[activity()][surface()]; }
 function doneWord(){ return ACT[activity()].done; }
 function tolKm(target){ return Math.max(TOL_KM, Math.round(target * 0.1)); }
 
+/* ---------- Himmelsrichtung ---------- */
+// Optional: Die Runde soll vom Start aus in eine bestimmte Richtung führen (N, NO, O …).
+// Dann werden statt zufälliger Rundkurse Zwischenziele in diesem Sektor gesetzt.
+const DIR_SHORT = { 0: "N", 45: "NO", 90: "O", 135: "SO", 180: "S", 225: "SW", 270: "W", 315: "NW" };
+function direction(){ const v = store.get("dir", ""); return v !== "" && DIR_SHORT[v] !== undefined ? Number(v) : null; }
+let dirMarker = null;
+function showDirection(){
+  const d = direction();
+  $("dirSel").value = d === null ? "" : String(d);
+  $("dirTxt").textContent = d === null ? "Alle" : DIR_SHORT[d];
+  $("dirBox").classList.toggle("on", d !== null);
+  $("dirIcon").style.transform = d === null ? "" : `rotate(${d - 45}deg)`;   // Nadel des Kompass-Symbols zeigt in die gewählte Richtung
+  if (dirMarker){ map.removeLayer(dirMarker); dirMarker = null; }
+  if (d !== null && start){
+    const col = getComputedStyle(document.documentElement).getPropertyValue("--pin").trim() || "#e8710a";
+    dirMarker = L.marker([start.lat, start.lng], { interactive: false, keyboard: false, zIndexOffset: -10,
+      icon: L.divIcon({ className: "", iconSize: [96, 96], iconAnchor: [48, 48],
+        html: `<svg class="dir-arrow-big" viewBox="0 0 96 96" style="transform:rotate(${d}deg)"><path d="M48 2 L58 19 L51 17 L51 30 L45 30 L45 17 L38 19 Z" fill="${col}" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>` }) }).addTo(map);
+  }
+}
+$("dirSel").onchange = () => {
+  store.set("dir", $("dirSel").value); showDirection();
+  if (results.length) status("Für die neue Richtung bitte neu suchen.");
+};
+// Punkt in Entfernung m (Meter) und Richtung brg (Grad) vom Punkt p
+function destPoint(p, brg, m){
+  const R = 6371000, d = m / R, b = brg * Math.PI / 180, la = p[0] * Math.PI / 180, lo = p[1] * Math.PI / 180;
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+  const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+  return [la2 * 180 / Math.PI, lo2 * 180 / Math.PI];
+}
+// Runde in Richtung brg: Start → 2–3 Zwischenziele im Sektor → Start. Länge über den Umfang skaliert.
+async function orsDirLoop(profile, lengthM, seed, nature, brg){
+  const rnd = (k) => { const x = Math.sin(seed * 9301 + k * 49297) * 233280; return x - Math.floor(x); };
+  const theta = brg + (rnd(1) - 0.5) * 30;          // ±15° Streuung um die gewählte Richtung
+  const alpha = 22 + rnd(2) * 23;                  // halber Öffnungswinkel 22–45°
+  const three = rnd(3) > 0.45;
+  const S = [start.lat, start.lng];
+  const shape = three ? [[theta - alpha, 1], [theta + (rnd(4) - 0.5) * 10, 1.15 + rnd(5) * 0.2], [theta + alpha, 1]] : [[theta - alpha, 1], [theta + alpha, 1]];
+  // Umfang für Radius 1 m berechnen, dann Radius so wählen, dass der Umfang der Wunschlänge entspricht
+  const unit = [[0, 0], ...shape.map(([b, k]) => [k * Math.sin(b * Math.PI / 180), k * Math.cos(b * Math.PI / 180)]), [0, 0]];
+  let per = 0; for (let i = 1; i < unit.length; i++) per += Math.hypot(unit[i][0] - unit[i-1][0], unit[i][1] - unit[i-1][1]);
+  const Rm = lengthM / per;
+  const pts = [S, ...shape.map(([b, k]) => destPoint(S, b, Rm * k)), S];
+  let err = null;
+  for (const rad of [Math.max(400, Rm * 0.25), -1]){
+    try { return mergeLegs(await orsVia(profile, pts, nature, pts.map((q, i) => (i === 0 || i === pts.length - 1) ? 350 : rad))); }
+    catch(e){ err = e; if (!(e.status === 404 || /routable|radius/i.test(e.message || ""))) throw e; await sleep(REQ_GAP_MS / 2); }
+  }
+  throw err;
+}
+
 /* ---------- Distanz ---------- */
 function km(){ const A = ACT[activity()], v = parseFloat(String($("km").value).replace(",", ".")); return isFinite(v) ? Math.min(A.max, Math.max(A.min, v)) : A.def; }
 const kmKey = () => "km_" + activity();
@@ -1173,6 +1239,7 @@ $("paceOk").onclick = () => {
 };
 $("paceModal").onclick = e => { if (e.target.id === "paceModal") $("paceOk").onclick(); };
 applyActivity();
+showDirection();
 
 /* ---------- API-Schlüssel ---------- */
 // Eingebauter Schlüssel: bleibt in der normalen App leer. Nur beim Bau der Tester-Version
@@ -1754,7 +1821,8 @@ async function search(){
       const cleanN = () => found.filter(r => r.clean).length;
       if (ph !== phases[0] && found.length >= 3 && cleanN() >= 1) break;
       // Längenfaktor je Profil: openrouteservice liefert oft deutlich längere/kürzere Runden als angefragt
-      const fKey = "lenFactor_" + ph.profile;
+      const dirB = direction();
+      const fKey = (dirB === null ? "lenFactor_" : "lenFactorDir_") + ph.profile;
       let factor = Number(store.get(fKey, "0.75")) || 0.75;
       let tries = 0;
       // weitersuchen, bis genug Runden da sind UND mindestens 2 davon saubere Rundkurse sind
@@ -1766,7 +1834,10 @@ async function search(){
         const seed = Math.floor(Math.random() * 10000);
         const jitter = 0.92 + Math.random() * 0.16;
         let f;
-        try { f = await orsRoundTrip(ph.profile, Math.min(100000, target * 1000 * factor * jitter), points, seed, ph.nature); }
+        try {
+          f = dirB === null ? await orsRoundTrip(ph.profile, Math.min(100000, target * 1000 * factor * jitter), points, seed, ph.nature)
+                            : await orsDirLoop(ph.profile, Math.min(100000, target * 1000 * factor * jitter), seed, ph.nature, dirB);
+        }
         catch(e){
           errCount++; lastErr = e.message;
           if (e.code === "key"){ stopped = "key"; break; }
